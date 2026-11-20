@@ -1,0 +1,259 @@
+# App Composition — "dev" variant (the XRD's defaultCompositionRef).
+#
+# Pipeline (Crossplane v2: Pipeline mode is the only mode):
+#   1. app-core   function-patch-and-transform  Deployment + Service (always)
+#   2. database   function-go-templating        conditional: CNPG Postgres via
+#                                               provider-helm, observe-only
+#                                               lookups via provider-kubernetes,
+#                                               connection Secret, XR status
+#   3. ready      function-auto-ready           XR Ready only when all composed
+#                                               resources are Ready
+#
+# dev vs prod (app-prod.yaml): dev = tiny requests, 1 Postgres instance, no PDBs.
+apiVersion: apiextensions.crossplane.io/v1
+kind: Composition
+metadata:
+  name: app-dev
+  labels:
+    platform.demo.io/env: dev
+spec:
+  compositeTypeRef:
+    apiVersion: platform.demo.io/v1alpha1
+    kind: App
+  mode: Pipeline
+  pipeline:
+    # ------------------------------------------------------------------ 1
+    - step: app-core
+      functionRef:
+        name: function-patch-and-transform
+      input:
+        apiVersion: pt.fn.crossplane.io/v1beta1
+        kind: Resources
+        resources:
+          - name: deployment
+            base:
+              apiVersion: apps/v1
+              kind: Deployment
+              spec:
+                replicas: 1
+                selector:
+                  matchLabels: {}
+                template:
+                  metadata:
+                    labels: {}
+                  spec:
+                    containers:
+                      - name: app
+                        image: placeholder
+                        ports:
+                          - name: http
+                            containerPort: 80
+                        readinessProbe:
+                          tcpSocket: { port: http }
+                          periodSeconds: 5
+                        resources:
+                          requests: { cpu: 10m, memory: 16Mi }
+                          limits: { cpu: 200m, memory: 64Mi }
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.selector.matchLabels[app.kubernetes.io/name]
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.template.metadata.labels[app.kubernetes.io/name]
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.image
+                toFieldPath: spec.template.spec.containers[0].image
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.replicas
+                toFieldPath: spec.replicas
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.port
+                toFieldPath: spec.template.spec.containers[0].ports[0].containerPort
+              - type: ToCompositeFieldPath
+                fromFieldPath: status.availableReplicas
+                toFieldPath: status.availableReplicas
+
+          - name: service
+            base:
+              apiVersion: v1
+              kind: Service
+              spec:
+                type: ClusterIP
+                selector: {}
+                ports:
+                  - name: http
+                    port: 80
+                    targetPort: http
+            patches:
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: metadata.name
+              - type: FromCompositeFieldPath
+                fromFieldPath: metadata.name
+                toFieldPath: spec.selector[app.kubernetes.io/name]
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.port
+                toFieldPath: spec.ports[0].port
+              # optional override; patches apply in order, so this one wins if set
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.servicePort
+                toFieldPath: spec.ports[0].port
+              # expose: true -> LoadBalancer. Docker Desktop forwards LB ports to
+              # localhost; NodePorts are NOT reachable from the Mac on its
+              # kind-based cluster, and Ingress would need a controller.
+              - type: FromCompositeFieldPath
+                fromFieldPath: spec.expose
+                toFieldPath: spec.type
+                transforms:
+                  - type: convert
+                    convert: { toType: string }
+                  - type: map
+                    map:
+                      "true": LoadBalancer
+                      "false": ClusterIP
+
+    # ------------------------------------------------------------------ 2
+    - step: database
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- /* ---------- variant profile (the only block that differs from app-prod) */}}
+            {{- $profile := dict "dbInstances" 1 "dbPDB" false }}
+            {{- $sizes := dict
+                  "small"  (dict "cpu" "100m" "mem" "256Mi" "memLimit" "512Mi" "storage" "1Gi")
+                  "medium" (dict "cpu" "250m" "mem" "512Mi" "memLimit" "1Gi"   "storage" "2Gi") }}
+            {{- /* ---------- inputs */}}
+            {{- $xr   := .observed.composite.resource }}
+            {{- $name := $xr.metadata.name }}
+            {{- $ns   := $xr.metadata.namespace }}
+            {{- $port := $xr.spec.servicePort | default ($xr.spec.port | default 80) }}
+            {{- $db   := $xr.spec.database | default dict }}
+            {{- $obs  := .observed.resources | default dict }}
+            {{- $dbReady := false }}
+            {{- $connSecret := "" }}
+            {{- if $db.enabled }}
+            {{- $s := get $sizes ($db.size | default "small") }}
+            ---
+            # Postgres via provider-helm: the cnpg/cluster chart renders a CNPG
+            # Cluster; the CNPG operator (platform prerequisite) runs it.
+            apiVersion: helm.m.crossplane.io/v1beta1
+            kind: Release
+            metadata:
+              name: {{ $name }}-db
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: db-release
+            spec:
+              providerConfigRef: { kind: ClusterProviderConfig, name: default }
+              forProvider:
+                chart:
+                  name: cluster
+                  repository: https://cloudnative-pg.github.io/charts
+                  version: "0.9.0"
+                namespace: {{ $ns }}
+                skipCreateNamespace: true
+                values:
+                  fullnameOverride: {{ $name }}-db
+                  cluster:
+                    instances: {{ $profile.dbInstances }}
+                    imageName: ghcr.io/cloudnative-pg/postgresql:18.7-minimal-trixie
+                    enablePDB: {{ $profile.dbPDB }}
+                    enableSuperuserAccess: false
+                    initdb: { database: app, owner: app }
+                    storage: { size: {{ $s.storage }} }
+                    resources:
+                      requests: { cpu: {{ $s.cpu }}, memory: {{ $s.mem }} }
+                      limits: { memory: {{ $s.memLimit }} }
+            {{- if hasKey $obs "db-release" }}
+            ---
+            # Observe-only: read the CNPG Cluster's status (we don't own it, Helm
+            # does). Ready when CNPG reports the Cluster Ready -> status.dbReady.
+            apiVersion: kubernetes.m.crossplane.io/v1alpha1
+            kind: Object
+            metadata:
+              name: {{ $name }}-db-cluster
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: db-cluster
+            spec:
+              managementPolicies: ["Observe"]
+              providerConfigRef: { kind: ClusterProviderConfig, name: default }
+              readiness:
+                policy: DeriveFromCelQuery
+                celQuery: >-
+                  has(object.status) && has(object.status.conditions) &&
+                  object.status.conditions.exists(c, c.type == "Ready" && c.status == "True")
+              forProvider:
+                manifest:
+                  apiVersion: postgresql.cnpg.io/v1
+                  kind: Cluster
+                  metadata: { name: {{ $name }}-db, namespace: {{ $ns }} }
+            ---
+            # Observe-only: read the credentials Secret the CNPG operator generates.
+            apiVersion: kubernetes.m.crossplane.io/v1alpha1
+            kind: Object
+            metadata:
+              name: {{ $name }}-db-app-secret
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: db-app-secret
+            spec:
+              managementPolicies: ["Observe"]
+              providerConfigRef: { kind: ClusterProviderConfig, name: default }
+              readiness: { policy: SuccessfulCreate }
+              forProvider:
+                manifest:
+                  apiVersion: v1
+                  kind: Secret
+                  metadata: { name: {{ $name }}-db-app, namespace: {{ $ns }} }
+            {{- end }}
+            {{- $conds := dig "db-cluster" "resource" "status" "conditions" list $obs }}
+            {{- range $conds }}{{ if and (eq .type "Ready") (eq .status "True") }}{{ $dbReady = true }}{{ end }}{{ end }}
+            {{- $data := dig "db-app-secret" "resource" "status" "atProvider" "manifest" "data" dict $obs }}
+            {{- if $data.password }}
+            {{- $connSecret = printf "%s-db-conn" $name }}
+            ---
+            # The App's connection Secret (v2 XRs have no native connection
+            # secrets, so we compose one). Values are already base64 from the
+            # observed Secret, so they go straight into .data.
+            apiVersion: v1
+            kind: Secret
+            metadata:
+              name: {{ $connSecret }}
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: connection-secret
+              labels:
+                platform.demo.io/app: {{ $name }}
+            type: Opaque
+            data:
+              host: {{ $data.host }}
+              port: {{ $data.port }}
+              dbname: {{ $data.dbname }}
+              username: {{ $data.username }}
+              password: {{ $data.password }}
+              uri: {{ $data.uri }}
+            {{- end }}
+            {{- end }}
+            ---
+            # Status back to the XR (go-templating merges this into the composite).
+            apiVersion: platform.demo.io/v1alpha1
+            kind: App
+            status:
+              {{- if $xr.spec.expose }}
+              url: http://localhost:{{ $port }}
+              {{- else }}
+              url: http://{{ $name }}.{{ $ns }}.svc.cluster.local:{{ $port }}
+              {{- end }}
+              dbReady: {{ $dbReady }}
+              connectionSecret: {{ $connSecret | quote }}
+
+    # ------------------------------------------------------------------ 3
+    - step: ready
+      functionRef:
+        name: function-auto-ready

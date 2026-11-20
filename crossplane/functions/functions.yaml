@@ -1,7 +1,6 @@
 # Composition functions used by the App Compositions (crossplane/compositions/).
 # Crossplane v2 has no default registry -> fully-qualified package refs.
 # Versions must match versions.env (enforced by tests/check-versions.sh).
----
 # Declarative patches & transforms, the v2 replacement for the removed native P&T.
 apiVersion: pkg.crossplane.io/v1
 kind: Function

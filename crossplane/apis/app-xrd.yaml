@@ -1,0 +1,96 @@
+# The platform API: a namespaced composite resource (XR) called App.
+#
+# Crossplane v2 idioms:
+#  - apiextensions.crossplane.io/v2 + scope: Namespaced -> developers create
+#    `App` directly in their namespace. No claims (v2 XRs don't support them).
+#  - Composition selection lives under spec.crossplane.* on the XR.
+#  - No native XR connection secrets in v2: the Composition composes a Secret.
+#
+# The OpenAPI schema is the "policy": the API server rejects bad values
+# (e.g. database.size: huge) before Crossplane ever sees them.
+apiVersion: apiextensions.crossplane.io/v2
+kind: CompositeResourceDefinition
+metadata:
+  name: apps.platform.demo.io
+spec:
+  scope: Namespaced
+  group: platform.demo.io
+  names:
+    kind: App
+    plural: apps
+    categories: [crossplane, platform]
+  # XRs without spec.crossplane.compositionRef/Selector get the dev variant.
+  defaultCompositionRef:
+    name: app-dev
+  versions:
+    - name: v1alpha1
+      served: true
+      referenceable: true
+      additionalPrinterColumns:
+        - { name: IMAGE, type: string, jsonPath: .spec.image }
+        - { name: REPLICAS, type: integer, jsonPath: .spec.replicas }
+        - { name: URL, type: string, jsonPath: .status.url }
+        - { name: DB-READY, type: boolean, jsonPath: .status.dbReady }
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              description: What a developer asks for.
+              required: [image]
+              properties:
+                image:
+                  type: string
+                  minLength: 1
+                  description: Container image to run.
+                replicas:
+                  type: integer
+                  minimum: 0
+                  maximum: 10
+                  default: 1
+                port:
+                  type: integer
+                  minimum: 1
+                  maximum: 65535
+                  default: 80
+                  description: Port the container listens on.
+                servicePort:
+                  type: integer
+                  minimum: 1
+                  maximum: 65535
+                  description: >-
+                    Service port; defaults to `port`. With expose=true the app is
+                    served at http://localhost:<servicePort> (Docker Desktop
+                    forwards LoadBalancer ports to the Mac), so each exposed App
+                    needs a free host port.
+                expose:
+                  type: boolean
+                  default: false
+                  description: Make the app reachable from the Mac host (Service type LoadBalancer).
+                database:
+                  type: object
+                  default: {}
+                  properties:
+                    enabled:
+                      type: boolean
+                      default: false
+                    size:
+                      type: string
+                      enum: [small, medium]
+                      default: small
+                      description: small = laptop-sized; medium = more CPU/RAM/storage.
+            status:
+              type: object
+              description: Written back by the Composition.
+              properties:
+                url:
+                  type: string
+                  description: Where to reach the app (host URL if exposed, else in-cluster DNS).
+                availableReplicas:
+                  type: integer
+                dbReady:
+                  type: boolean
+                connectionSecret:
+                  type: string
+                  description: Name of the Secret (same namespace) with DB connection details.

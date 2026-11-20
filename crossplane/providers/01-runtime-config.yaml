@@ -24,6 +24,15 @@ spec:
         spec:
           containers:
             - name: package-runtime
+              args:
+                # In this demo provider-kubernetes only runs Observe-only Objects.
+                # With SSA enabled it still computes "desired state" via a
+                # dry-run server-side apply = a PATCH request, which RBAC can't
+                # tell apart from a real write. Client-side mode lets Observe
+                # get by with get/list/watch only (see 03-rbac.yaml).
+                - --no-enable-server-side-apply   # kingpin bool: --no-<flag>, not =false
+                # Smaller status.atProvider.manifest (drop managedFields noise).
+                - --remove-managed-fields
               resources:
                 requests: { cpu: 25m, memory: 64Mi }
                 limits: { cpu: 500m, memory: 256Mi }

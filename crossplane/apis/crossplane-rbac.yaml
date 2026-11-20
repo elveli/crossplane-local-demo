@@ -1,0 +1,19 @@
+# RBAC for Crossplane *core* to compose native Kubernetes kinds directly.
+#
+# In v2 a Composition can create any Kubernetes resource, not just managed
+# resources. Crossplane needs RBAC for each kind. Its built-in role
+# (crossplane:system:aggregate-to-crossplane) already covers Deployments,
+# Services, Secrets and ConfigMaps (it uses them to run package pods), so the
+# only kind the App Compositions add is PodDisruptionBudget (prod variant).
+#
+# The label makes Kubernetes aggregate these rules into the `crossplane` ClusterRole.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: crossplane-demo:compose-native
+  labels:
+    rbac.crossplane.io/aggregate-to-crossplane: "true"
+rules:
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]

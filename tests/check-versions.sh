@@ -17,4 +17,12 @@ check crossplane/providers/02-providers.yaml provider-helm                "$PROV
 check crossplane/functions/functions.yaml    function-patch-and-transform "$FUNCTION_PATCH_AND_TRANSFORM_VERSION"
 check crossplane/functions/functions.yaml    function-go-templating       "$FUNCTION_GO_TEMPLATING_VERSION"
 check crossplane/functions/functions.yaml    function-auto-ready          "$FUNCTION_AUTO_READY_VERSION"
+for comp in crossplane/compositions/app-*.yaml; do
+  grep -q "version: \"$CNPG_CLUSTER_CHART_VERSION\"" "$comp" \
+    && printf 'ok    %-32s %s\n' "cnpg/cluster chart ($(basename "$comp"))" "$CNPG_CLUSTER_CHART_VERSION" \
+    || { printf 'FAIL  cnpg/cluster chart version in %s != %s\n' "$comp" "$CNPG_CLUSTER_CHART_VERSION"; fail=1; }
+  grep -q "imageName: $POSTGRES_IMAGE\$" "$comp" \
+    && printf 'ok    %-32s %s\n' "postgres image ($(basename "$comp"))" "${POSTGRES_IMAGE##*:}" \
+    || { printf 'FAIL  postgres image in %s != %s\n' "$comp" "$POSTGRES_IMAGE"; fail=1; }
+done
 exit $fail

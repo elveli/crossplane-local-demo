@@ -1,0 +1,15 @@
+# The developer-facing request. No compositionSelector -> the XRD's default
+# Composition (app-dev) is used.
+apiVersion: platform.demo.io/v1alpha1
+kind: App
+metadata:
+  name: hello
+  namespace: team-a
+spec:
+  image: nginxdemos/hello:plain-text
+  replicas: 2
+  port: 80
+  database:
+    enabled: true
+    size: small   # small|medium
+  expose: true

@@ -18,7 +18,7 @@ CNPG_NS := cnpg-system
 LOCAL_KCFG := .local/kubeconfig
 
 .DEFAULT_GOAL := help
-.PHONY: help up crossplane providers cnpg crossplane-status providers-status status \
+.PHONY: help up crossplane providers cnpg apis crossplane-status providers-status status \
         rbac-audit check-versions logs-crossplane logs-kubernetes logs-helm logs-cnpg
 
 help:
@@ -27,6 +27,7 @@ help:
 	@printf "  %-24s %s\n" "make up" "Preflight + cluster, Crossplane, providers, APIs"
 	@printf "  %-24s %s\n" "make crossplane" "Install/upgrade Crossplane via Helm (pinned)"
 	@printf "  %-24s %s\n" "make providers" "Providers, functions, RBAC, ProviderConfigs, CNPG operator"
+	@printf "  %-24s %s\n" "make apis" "XRD (App API) + dev/prod Compositions + RBAC"
 	@printf "  %-24s %s\n" "make status" "Crossplane pods, packages, ProviderConfigs"
 	@printf "  %-24s %s\n" "make crossplane-status" "Show Crossplane pods, release, version"
 	@printf "  %-24s %s\n" "make providers-status" "Show providers/functions health"
@@ -39,7 +40,7 @@ help:
 
 up:
 	CLUSTER=$(CLUSTER) ./scripts/cluster-up.sh
-	$(MAKE) crossplane providers
+	$(MAKE) crossplane providers apis
 
 crossplane:
 	$(H) repo add crossplane-stable https://charts.crossplane.io/stable >/dev/null 2>&1 || true
@@ -70,6 +71,14 @@ cnpg:
 	$(H) upgrade --install cnpg cnpg/cloudnative-pg --version $(CNPG_OPERATOR_CHART_VERSION) \
 	  --namespace $(CNPG_NS) --create-namespace -f cluster/cnpg-values.yaml --wait --timeout 5m
 	$(K) wait --for=condition=Established --timeout=120s crd/clusters.postgresql.cnpg.io
+
+apis: check-versions
+	CLUSTER=$(CLUSTER) ./scripts/prepull.sh app
+	$(K) apply -f crossplane/apis/crossplane-rbac.yaml -f crossplane/apis/app-xrd.yaml
+	@# v2 namespaced XRDs have no claims, so no "Offered" condition -- only Established.
+	$(K) wait --for=condition=Established --timeout=120s xrd/apps.platform.demo.io
+	$(K) apply -f crossplane/compositions/
+	$(K) get xrd,compositions
 
 crossplane-status:
 	$(K) get pods -n $(XP_NS)
