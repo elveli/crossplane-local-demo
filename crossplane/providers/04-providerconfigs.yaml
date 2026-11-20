@@ -1,0 +1,26 @@
+# ProviderConfigs for the v2 *namespaced* managed resources (the `.m.` API groups).
+#
+# A ClusterProviderConfig named `default` is what a namespaced MR uses when its
+# providerConfigRef is omitted; the Compositions still set it explicitly
+# (`kind: ClusterProviderConfig, name: default`) for clarity.
+#
+# InjectedIdentity = "use the provider pod's own ServiceAccount token". The
+# providers talk to the cluster they run in, with exactly the permissions
+# granted in 03-rbac.yaml (+ Crossplane's auto-granted system role).
+# Applied after the providers are Healthy (their CRDs must exist first).
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: ClusterProviderConfig
+metadata:
+  name: default
+spec:
+  credentials:
+    source: InjectedIdentity
+---
+apiVersion: helm.m.crossplane.io/v1beta1
+kind: ClusterProviderConfig
+metadata:
+  name: default
+spec:
+  credentials:
+    source: InjectedIdentity

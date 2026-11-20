@@ -1,0 +1,48 @@
+# DeploymentRuntimeConfig = how Crossplane runs each provider's pod.
+# (Replaces the removed v1 ControllerConfig.)
+#
+# Why one per provider: each provider gets a *named, stable* ServiceAccount so
+# 03-rbac.yaml can bind exactly the extra permissions that provider needs, and
+# nothing more. Without a name, Crossplane generates one per package revision
+# (e.g. provider-helm-1a2b3c4d5e6f), which changes on every upgrade.
+#
+# Resources: small requests for laptops; limits leave headroom for Helm chart
+# rendering (provider-helm) and informer caches (provider-kubernetes).
+---
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: provider-kubernetes
+spec:
+  serviceAccountTemplate:
+    metadata:
+      name: provider-kubernetes
+  deploymentTemplate:
+    spec:
+      selector: {}
+      template:
+        spec:
+          containers:
+            - name: package-runtime
+              resources:
+                requests: { cpu: 25m, memory: 64Mi }
+                limits: { cpu: 500m, memory: 256Mi }
+---
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: provider-helm
+spec:
+  serviceAccountTemplate:
+    metadata:
+      name: provider-helm
+  deploymentTemplate:
+    spec:
+      selector: {}
+      template:
+        spec:
+          containers:
+            - name: package-runtime
+              resources:
+                requests: { cpu: 25m, memory: 64Mi }
+                limits: { cpu: 500m, memory: 512Mi }

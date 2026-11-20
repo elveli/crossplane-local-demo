@@ -1,0 +1,28 @@
+# Composition functions used by the App Compositions (crossplane/compositions/).
+# Crossplane v2 has no default registry -> fully-qualified package refs.
+# Versions must match versions.env (enforced by tests/check-versions.sh).
+---
+# Declarative patches & transforms, the v2 replacement for the removed native P&T.
+apiVersion: pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: function-patch-and-transform
+spec:
+  package: xpkg.crossplane.io/crossplane-contrib/function-patch-and-transform:v0.11.2
+---
+# Go templates: used for the conditional parts (database, expose) and status.
+apiVersion: pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: function-go-templating
+spec:
+  package: xpkg.crossplane.io/crossplane-contrib/function-go-templating:v0.13.2
+---
+# Marks composed resources Ready from their own status conditions, so the XR is
+# Ready only when everything it composed is Ready.
+apiVersion: pkg.crossplane.io/v1
+kind: Function
+metadata:
+  name: function-auto-ready
+spec:
+  package: xpkg.crossplane.io/crossplane-contrib/function-auto-ready:v0.7.3

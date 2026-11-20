@@ -1,0 +1,5 @@
+.local/
+_out/
+*.tgz
+.DS_Store
+.env

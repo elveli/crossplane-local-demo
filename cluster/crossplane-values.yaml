@@ -1,0 +1,20 @@
+# Helm values for crossplane-stable/crossplane (version pinned in versions.env).
+# Laptop-friendly: chart defaults are already 1 replica each; we only trim the
+# *requests* so the scheduler doesn't reserve RAM we rarely use. Limits stay at
+# chart defaults — Crossplane's memory grows with the number of CRDs it watches
+# (the optional AWS providers in Phase 6 add many), and a tight limit = OOMKilled.
+resourcesCrossplane:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 1024Mi
+
+resourcesRBACManager:
+  requests:
+    cpu: 25m
+    memory: 64Mi
+  limits:
+    cpu: 100m
+    memory: 512Mi

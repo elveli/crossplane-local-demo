@@ -1,0 +1,65 @@
+# Extra RBAC for the providers' named ServiceAccounts (see 01-runtime-config.yaml).
+#
+# What Crossplane already grants (verified with `make rbac-audit`): the RBAC
+# manager binds each provider SA to `crossplane:provider:<rev>:system`, which
+# covers the provider's own CRDs plus `*` on secrets, configmaps, events and
+# leases cluster-wide (that's how providers write connection Secrets). We can't
+# narrow that without disabling the RBAC manager, so we only ADD what's missing:
+#
+#   provider-helm        installs the cnpg/cluster chart per App. That chart
+#                        renders a postgresql.cnpg.io Cluster + a ConfigMap.
+#                        ConfigMaps (and Helm's release-state Secrets) are
+#                        already covered, so it only needs CRUD on Clusters.
+#                        No namespace perms: Releases use skipCreateNamespace.
+#
+#   provider-kubernetes  only runs Observe-only Objects (read the operator-made
+#                        `<db>-app` Secret and Cluster status). Read-only on
+#                        Clusters; reading Secrets is already covered.
+#
+# Why ClusterRole + ClusterRoleBinding (not per-namespace RoleBindings): Apps
+# live in any team namespace and the providers watch cluster-wide. Per-namespace
+# RoleBindings are tighter but need a binding per tenant namespace; see README.
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: crossplane-demo:provider-helm
+rules:
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: crossplane-demo:provider-helm
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: crossplane-demo:provider-helm
+subjects:
+  - kind: ServiceAccount
+    name: provider-helm
+    namespace: crossplane-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: crossplane-demo:provider-kubernetes
+rules:
+  - apiGroups: ["postgresql.cnpg.io"]
+    resources: ["clusters"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: crossplane-demo:provider-kubernetes
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: crossplane-demo:provider-kubernetes
+subjects:
+  - kind: ServiceAccount
+    name: provider-kubernetes
+    namespace: crossplane-system

@@ -1,0 +1,9 @@
+# CloudNativePG operator (platform prerequisite, installed by `make providers`).
+# Why CNPG and not Bitnami: since 2025 Bitnami's free images publish only
+# `latest` (no pinnable tags), which breaks reproducibility. CNPG is Apache-2.0,
+# has pinned multi-arch images, and generates a `<cluster>-app` Secret with the
+# full connection info that the App Composition reads.
+replicaCount: 1
+resources:
+  requests: { cpu: 25m, memory: 64Mi }
+  limits: { cpu: 500m, memory: 256Mi }
