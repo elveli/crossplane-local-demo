@@ -1,0 +1,6 @@
+# MUST FAIL validation: image is required.
+apiVersion: platform.demo.io/v1alpha1
+kind: App
+metadata: { name: no-image, namespace: team-a }
+spec:
+  replicas: 1

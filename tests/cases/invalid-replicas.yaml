@@ -1,0 +1,7 @@
+# MUST FAIL validation: replicas maximum is 10.
+apiVersion: platform.demo.io/v1alpha1
+kind: App
+metadata: { name: bad-replicas, namespace: team-a }
+spec:
+  image: nginxdemos/hello:plain-text
+  replicas: 50

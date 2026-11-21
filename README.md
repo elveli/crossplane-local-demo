@@ -1,0 +1,563 @@
+# Crossplane Local Demo
+
+A self-contained **Crossplane v2** platform-engineering demo that runs entirely on
+**Docker Desktop** (built for Intel Macs). It needs no cloud account and no credentials.
+A developer creates one small `App` object, and the platform turns it into a
+Deployment, a Service, a PostgreSQL database and a connection Secret. It then keeps
+them in the declared state.
+
+It's the sequel to [Crossplane-AWS-Demo](https://github.com/elveli/Crossplane-AWS-Demo),
+which used raw managed resources against real AWS (see
+[Evolution from Crossplane-AWS-Demo](#evolution-from-crossplane-aws-demo)).
+
+![Architecture](docs/architecture.svg)
+
+## Table of Contents
+
+- [What Does This Demo Implement?](#what-does-this-demo-implement)
+- [Architecture](#architecture)
+- [Repository Structure](#repository-structure)
+- [Prerequisites](#prerequisites)
+- [Quick Start (5 minutes)](#quick-start-5-minutes)
+- [Makefile Command Reference](#makefile-command-reference)
+- [The Demo, Scene by Scene](#the-demo-scene-by-scene)
+- [How It Works](#how-it-works)
+- [Offline Testing](#offline-testing)
+- [Crossplane v1 → v2: What Changed](#crossplane-v1--v2-what-changed)
+- [Evolution from Crossplane-AWS-Demo](#evolution-from-crossplane-aws-demo)
+- [Troubleshooting](#troubleshooting)
+- [Cleanup](#cleanup)
+- [Pinned Versions](#pinned-versions)
+- [Quick Reference Cheat Sheet](#quick-reference-cheat-sheet)
+
+## What Does This Demo Implement?
+
+A namespaced **platform API**, `App` (`platform.demo.io/v1alpha1`), that a developer
+creates directly in their own namespace:
+
+```yaml
+apiVersion: platform.demo.io/v1alpha1
+kind: App
+metadata: { name: hello, namespace: team-a }
+spec:
+  image: nginxdemos/hello:plain-text
+  replicas: 2
+  port: 80
+  database: { enabled: true, size: small }   # small|medium
+  expose: true
+```
+
+From that one object, Crossplane builds and maintains:
+
+| Resource | How it's created | Notes |
+|---|---|---|
+| `Deployment` + `Service` | composed **directly** (v2 can compose any Kubernetes kind) | `expose: true` gives a LoadBalancer at `http://localhost:<port>` |
+| PostgreSQL 18.7 | **provider-helm** `Release` installs the CloudNativePG `cluster` chart | `size` sets CPU, memory and storage |
+| `Secret <app>-db-conn` | composed from the database credentials, which **provider-kubernetes** reads with observe-only access | `host`, `port`, `dbname`, `username`, `password`, `uri` |
+| `status.url`, `status.dbReady`, `status.availableReplicas`, `status.connectionSecret` | written back to the App by the Composition | `kubectl get app` shows them as columns |
+
+There are two implementations of the same API: **`app-dev`** (the default) and
+**`app-prod`** (2 Postgres instances, PodDisruptionBudgets, bigger requests). An App
+chooses one with `spec.crossplane.compositionSelector`.
+
+## Architecture
+
+The diagram above shows the components. This sequence shows what happens when a
+developer applies an App:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Dev as Developer (Mac)
+    participant API as kube-apiserver
+    participant XP as Crossplane
+    participant Fn as Functions<br/>(P&T → go-templating → auto-ready)
+    participant Helm as provider-helm
+    participant CNPG as CNPG operator
+    participant K8s as provider-kubernetes
+
+    Dev->>API: kubectl apply App/hello
+    API-->>Dev: rejected if schema invalid (e.g. size: huge)
+    API->>XP: App created (watch)
+    XP->>Fn: run pipeline (observed state → desired state)
+    Fn-->>XP: Deployment, Service, Release (+ status)
+    XP->>API: apply Deployment + Service directly
+    XP->>API: apply Release (helm.m.crossplane.io)
+    Helm->>API: helm install cnpg/cluster → Cluster CR
+    CNPG->>API: Postgres pod, Services, Secret hello-db-app
+    XP->>Fn: re-run pipeline (Release now observed)
+    Fn-->>XP: + observe-only Objects for Cluster & Secret
+    K8s->>API: get Cluster status / Secret data
+    XP->>Fn: re-run (credentials observed, Cluster Ready)
+    Fn-->>XP: + Secret hello-db-conn, status.dbReady=true
+    Note over XP,Fn: function-auto-ready marks the App Ready<br/>only when every composed resource is Ready
+```
+
+**Key points**
+
+- **Everything is local.** Docker Desktop's built-in Kubernetes runs Crossplane,
+  two providers, three functions and the CloudNativePG operator. Measured footprint
+  with one App and its database: **about 414 MiB** (Crossplane and packages 297 MiB,
+  CNPG operator 34 MiB, App with Postgres 83 MiB).
+- **Native resources need no provider.** In v2, a Composition creates Deployments,
+  Services and Secrets directly. Providers are used only where they add something:
+  Helm for the database chart, and Kubernetes for reading objects the Composition
+  doesn't own.
+- **Database readiness is real.** `status.dbReady` comes from CNPG reporting the
+  Cluster `Ready`, not from "the Helm install finished".
+- **Every command passes `--context`**, so nothing can reach a non-local cluster by
+  accident.
+
+## Repository Structure
+
+```text
+.
+├── Makefile                       # all entry points (make help)
+├── versions.env                   # every pinned version, single source of truth
+├── cluster/
+│   ├── crossplane-values.yaml     # Helm values: laptop-sized requests
+│   ├── cnpg-values.yaml           # CloudNativePG operator values
+│   └── kind-config.yaml           # CLUSTER=kind fallback
+├── crossplane/
+│   ├── providers/
+│   │   ├── 01-runtime-config.yaml # DeploymentRuntimeConfigs (named SAs, resources, args)
+│   │   ├── 02-providers.yaml      # provider-kubernetes, provider-helm
+│   │   ├── 03-rbac.yaml           # the extra provider permissions (and why)
+│   │   └── 04-providerconfigs.yaml# ClusterProviderConfigs, InjectedIdentity
+│   ├── functions/functions.yaml   # patch-and-transform, go-templating, auto-ready
+│   ├── apis/
+│   │   ├── app-xrd.yaml           # the App API (v2 XRD, scope: Namespaced)
+│   │   └── crossplane-rbac.yaml   # lets Crossplane compose PodDisruptionBudgets
+│   └── compositions/
+│       ├── app-dev.yaml           # default implementation
+│       └── app-prod.yaml          # HA-ish implementation (select by label)
+├── examples/                      # namespace.yaml, hello.yaml, hello-prod.yaml
+├── scripts/
+│   ├── cluster-up.sh              # preflight + CLUSTER=docker-desktop|kind
+│   ├── prepull.sh                 # Docker Desktop registry-mirror workaround
+│   ├── demo.sh                    # the narrated 7-scene demo
+│   └── down.sh                    # ordered teardown + leftover check
+├── tests/
+│   ├── render-test.sh             # golden-file tests (crossplane composition render)
+│   ├── validate.sh                # crossplane resource validate (+ must-fail cases)
+│   ├── check-versions.sh          # manifests must match versions.env
+│   ├── cases/  fixtures/  golden/
+└── docs/architecture.svg
+```
+
+## Prerequisites
+
+**Hardware and OS.** This was built and verified on an Intel (`x86_64`) Mac running
+macOS 26 with Docker Desktop 4.100. Everything uses `linux/amd64` images and no
+platform flags. Apple Silicon should work too, since every image is multi-arch, but
+it hasn't been tested.
+
+**Docker Desktop settings**
+
+| Setting | Recommended | Where |
+|---|---|---|
+| CPUs | **4+** | Settings → Resources → Advanced |
+| Memory | **8 GB+** (the demo needs about 0.5 GiB, but leave headroom) | Settings → Resources → Advanced |
+| Kubernetes | **Enabled**, kind provisioner, 1 node | Settings → Kubernetes → Enable Kubernetes → Apply & restart |
+
+`scripts/cluster-up.sh` warns if Docker has fewer than 4 CPUs or less than 8 GB. If
+memory is tight, create Apps with `database.enabled: false`.
+
+**CLIs** (Homebrew; no `sudo`):
+
+```bash
+brew install kubectl helm crossplane    # crossplane CLI >= 2.5 (new command names)
+brew install kind shellcheck            # optional: kind fallback, script linting
+```
+
+## Quick Start (5 minutes)
+
+```bash
+git clone https://github.com/elveli/crossplane-local-demo && cd crossplane-local-demo
+
+make up      # preflight, Crossplane, providers, functions, CNPG operator, App API (~2 min)
+make demo    # narrated demo; press Enter between scenes (~3 min)
+make test    # offline: golden renders + schema validation (~20 s, no cluster)
+make down    # remove everything this demo installed
+```
+
+Or use your own App:
+
+```bash
+kubectl --context docker-desktop apply -f examples/namespace.yaml -f examples/hello.yaml
+kubectl --context docker-desktop get app -n team-a -w          # wait for READY=True (~1 min)
+crossplane resource trace app/hello -n team-a --context docker-desktop
+curl localhost:80
+```
+
+Measured on the reference Intel Mac with images already cached: `make up` 1m43s,
+App Ready in about 65 s, `make demo-auto` 2m45s. The first run downloads about 1 GB
+of images and takes longer.
+
+**kind fallback:** `CLUSTER=kind make up` creates a single-node kind cluster named
+`crossplane-demo`, and every target accepts `CLUSTER=kind`. kind has no LoadBalancer
+implementation, and an exposed App's Service would stay `<pending>` (so the App never
+becomes Ready). On kind the demo therefore applies `hello` with `expose: false` and
+reaches it through `kubectl port-forward`. No image pre-pull is needed, because kind
+nodes pull directly rather than through Docker Desktop's mirror. Verified: `make up`
+3m26s on a cold kind cluster, `make demo-auto` 2m40s with all scenes passing, and
+`make down` (deletes the cluster) 2s.
+
+## Makefile Command Reference
+
+| Command | Description |
+|---|---|
+| `make up` | Preflight, cluster, then `crossplane providers apis` |
+| `make crossplane` | Install or upgrade Crossplane via the pinned Helm chart |
+| `make providers` | Pre-pull images, DeploymentRuntimeConfigs, providers, RBAC, functions, ProviderConfigs, CNPG operator |
+| `make apis` | XRD, both Compositions, Crossplane RBAC |
+| `make demo` / `make demo-auto` | 7-scene narrated demo, with or without pauses |
+| `make render` | Offline: render `examples/hello.yaml`, plain and with "Postgres ready" observed state |
+| `make test` | Offline: `check-versions`, shellcheck, golden renders, schema validation |
+| `make status` | Packages, Crossplane and CNPG pods, ProviderConfigs |
+| `make crossplane-status` / `make providers-status` | Narrower status views |
+| `make rbac-audit` | `kubectl auth can-i` matrix for both provider ServiceAccounts |
+| `make check-versions` | Manifests must match `versions.env` |
+| `make logs-crossplane` / `logs-kubernetes` / `logs-helm` / `logs-cnpg` | Tail component logs |
+| `make down` | Ordered teardown and leftover check (kind: delete the cluster) |
+| `make nuke` | `down`, plus removing the demo's images from Docker and `.local/` |
+
+Target names follow the Crossplane-AWS-Demo conventions (`*-status`, `logs-*`,
+`crossplane-install` became `crossplane`, `teardown` became `down`).
+
+## The Demo, Scene by Scene
+
+`make demo` (pauses for Enter) or `make demo-auto`. Times were measured on the
+reference Intel Mac.
+
+| # | Scene | What you see | Time |
+|---|---|---|---|
+| 1 | Request an App | `kubectl get app -w` goes SYNCED, then READY; `crossplane resource trace` shows the full tree; the status JSON | ~65 s |
+| 2 | Use it from the Mac | `curl localhost:80` spread across both replicas; decoded connection Secret; a real `psql` login with those credentials | — |
+| 3 | Drift correction | `kubectl scale --replicas=5` is reverted to 2 (`metadata.generation` 1 → 3, and the managed-fields table shows Crossplane as the last writer); `kubectl delete deploy` is recreated with a new UID | 0–3 s |
+| 4 | Change propagation | `spec.replicas: 3` rolls out; `database.enabled: false` removes the Release, Cluster, observers and Secret. If scene 3 tripped the XR's watch circuit breaker, the script waits for it first (≤ ~60 s, narrated) | 3 s / ~60 s |
+| 5 | Validation | `size: huge` and `replicas: 50` are rejected by the API server | — |
+| 6 | Offline render | `crossplane composition render`: plain, with simulated observed state (the connection Secret appears), and the prod Composition | — |
+| 7 | Delete | `kubectl delete app` removes everything the App created | ~2 s |
+
+The script reruns cleanly: it removes a leftover `hello` first. If another process
+owns `127.0.0.1:<port>`, it switches to `kubectl port-forward` automatically.
+
+## How It Works
+
+### The API: a v2 XRD
+
+[`crossplane/apis/app-xrd.yaml`](crossplane/apis/app-xrd.yaml) uses
+`apiextensions.crossplane.io/v2` with `scope: Namespaced`. Developers create `App`
+objects directly in their namespace; there are no claims, and v2 XRs don't support
+them. The OpenAPI schema acts as policy: enums (`size: small|medium`), bounds
+(`replicas` 0–10), required fields (`image`) and defaults are enforced by the API
+server before Crossplane sees the object. `defaultCompositionRef: app-dev` picks the
+implementation when the App doesn't choose one.
+
+### The Compositions: Pipeline mode
+
+Both Compositions run the same three-step pipeline:
+
+1. **function-patch-and-transform**: the always-present part. A Deployment and
+   Service (plus a PDB in prod), patched from `spec`. `expose` maps to the Service
+   type through a `convert` transform followed by a `map` transform
+   (`true` → `LoadBalancer`, `false` → `ClusterIP`).
+2. **function-go-templating**: the conditional part. When `database.enabled` is
+   true, it emits a `helm.m.crossplane.io` `Release`. Once the Release is observed,
+   it adds two **observe-only** `kubernetes.m.crossplane.io` `Object`s, one for the
+   CNPG `Cluster` and one for the generated `<app>-db-app` Secret. Once the
+   credentials are observed, it emits the App's own `Secret <app>-db-conn` and
+   writes `status`. Each step waits for the previous one to be observed, so nothing
+   is applied too early.
+3. **function-auto-ready**: built-in health checks for Deployments, LoadBalancer
+   Services and Secrets, and the `Ready` condition for managed resources. The App
+   becomes `Ready` only when every composed resource is ready.
+
+**dev vs prod.** `app-prod.yaml` is generated from `app-dev.yaml` and differs only in
+its sizing profile: 2 CNPG instances with CNPG's PDB, an app PDB, larger requests and
+a liveness probe. An App selects it like this:
+
+```yaml
+spec:
+  crossplane:
+    compositionSelector:
+      matchLabels: { platform.demo.io/env: prod }
+```
+
+### Why CloudNativePG (and not Bitnami)
+
+Since 2025, Bitnami's free container images publish only the `latest` tag, so they
+can't be pinned or reproduced. CloudNativePG is Apache-2.0, ships pinned multi-arch
+images (`ghcr.io/cloudnative-pg/postgresql:18.7-minimal-trixie`) and generates a
+credentials Secret that the Composition reuses. The operator is a platform
+prerequisite installed once by `make providers`; each App gets its own `Cluster`
+through provider-helm.
+
+### Connection secrets in v2
+
+v2 XRs have no built-in connection-secret support (`writeConnectionSecretToRef` on
+XRs is gone). The Composition composes a plain `Secret` instead, copying the
+already-base64 values from the observed CNPG Secret. Consumers mount
+`<app>-db-conn` like any other Secret.
+
+### Watch circuit breaker (new in v2)
+
+Crossplane v2 reacts to changes in composed resources immediately: it watches them,
+which is why drift is fixed in seconds. To protect the control plane from hot loops,
+each XR has a **circuit breaker**. More than 100 watch events in a burst (refilling
+at 1/s) opens it. While it's open, the XR is reconciled only about every 30 s, and it
+reports `Responsive=False, reason: WatchCircuitOpen` ("Too many watch events from
+Deployment/hello"). The default cooldown is **5 minutes**. This demo sets
+`--circuit-breaker-cooldown=1m` in `cluster/crossplane-values.yaml`, because the
+drift scene can trip it and 5 minutes is too long to wait in a live demo. Keep the
+default in production.
+
+### `expose`: why LoadBalancer
+
+These options were measured on Docker Desktop's kind-provisioned cluster:
+
+| Option | Reachable from the Mac? | Extra setup |
+|---|---|---|
+| NodePort | **No** (the kind node's ports aren't forwarded) | — |
+| **LoadBalancer** | **Yes**, at `localhost:<servicePort>` | none |
+| Ingress | Yes, but only through a LoadBalancer | an ingress controller (more RAM) |
+
+Each exposed App needs a free host port, so the API has an optional
+`spec.servicePort` (it defaults to `port`, which is the container port).
+`examples/hello-prod.yaml` uses 8090.
+
+### RBAC: least privilege, and why each piece exists
+
+| Piece | Why |
+|---|---|
+| `DeploymentRuntimeConfig` per provider ([01](crossplane/providers/01-runtime-config.yaml)) | Gives each provider a **named, stable ServiceAccount**, so bindings survive upgrades. It also sets small resource requests. Without it, Crossplane generates a new SA name per package revision. |
+| *Auto-granted* by the Crossplane RBAC manager | Each provider's own CRDs, plus `*` on Secrets, ConfigMaps, Events and Leases cluster-wide (this is how providers write connection secrets). This can't be narrowed without disabling the RBAC manager. |
+| `crossplane-demo:provider-helm` ([03](crossplane/providers/03-rbac.yaml)) | The chart renders a CNPG `Cluster` and a ConfigMap. ConfigMaps and Helm's release Secrets are already covered, so the only addition is CRUD on `clusters.postgresql.cnpg.io`. Releases use `skipCreateNamespace`, so there are no namespace permissions. |
+| `crossplane-demo:provider-kubernetes` ([03](crossplane/providers/03-rbac.yaml)) | **Read-only** on CNPG Clusters. Its Objects are observe-only. |
+| `--no-enable-server-side-apply` on provider-kubernetes | Even observe-only Objects compute desired state with a dry-run server-side apply, which is a `PATCH` request that RBAC can't tell apart from a real write. Client-side mode keeps the role read-only. |
+| `crossplane-demo:compose-native` ([apis](crossplane/apis/crossplane-rbac.yaml)) | Crossplane core already has Deployments, Services and Secrets (it uses them to run packages). Only **PodDisruptionBudgets** (prod) are added, via the `rbac.crossplane.io/aggregate-to-crossplane` label. |
+| ClusterProviderConfigs with `InjectedIdentity` ([04](crossplane/providers/04-providerconfigs.yaml)) | Providers authenticate with their own pod ServiceAccount token, so no credentials exist anywhere. |
+
+ClusterRoleBindings are used because Apps can live in any namespace. A stricter
+setup would put a RoleBinding in each tenant namespace. `make rbac-audit` prints the
+effective permissions:
+
+```text
+== provider-helm
+  create clusters.postgresql.cnpg.io -n team-a     yes
+  get clusters.postgresql.cnpg.io -n team-a        yes
+  create secrets -n team-a                         yes
+  create configmaps -n team-a                      yes
+  create deployments.apps -n team-a                no
+  create namespaces                                no
+  get nodes                                        no
+== provider-kubernetes
+  create clusters.postgresql.cnpg.io -n team-a     no
+  get clusters.postgresql.cnpg.io -n team-a        yes
+  create secrets -n team-a                         yes
+  create configmaps -n team-a                      yes
+  create deployments.apps -n team-a                no
+  create namespaces                                no
+  get nodes                                        no
+```
+
+## Offline Testing
+
+`make test` needs Docker, because functions run as local containers, but no cluster:
+
+```text
+ok    provider-kubernetes v1.4.1  …  (versions.env ↔ manifests)
+ok       shellcheck
+ok       render dev-minimal            # XRD defaults applied via --xrd
+ok       render dev-hello
+ok       render dev-hello-db-ready     # tests/fixtures/observed-db-ready.yaml
+ok       render prod-hello
+ok       render prod-hello-db-ready
+ok       validate: Total 30 resources: 0 missing schemas, 30 success cases, 0 failure cases
+ok       rejects invalid-missing-image.yaml: spec.image: Required value
+ok       rejects invalid-replicas.yaml: spec.replicas: Invalid value: 50 …
+ok       rejects invalid-size.yaml: spec.database.size: Unsupported value: "huge" …
+```
+
+- **Golden files** (`tests/golden/`) contain the full output of `crossplane composition
+  render --xrd … --include-full-xr`. Any change to a Composition shows up as a diff;
+  a 1 Mi change to a memory limit fails the test. To accept intended changes, run
+  `UPDATE=1 tests/render-test.sh` and review the diff.
+- **The observed-state fixture** contains dummy values only. It simulates "Postgres is
+  up" so the database branch (connection Secret, `dbReady`) is tested without a
+  cluster.
+- **`crossplane resource validate`** checks examples and every golden render against
+  the XRD and the CRDs downloaded from the pinned provider packages. The
+  `invalid-*.yaml` cases must fail.
+
+## Crossplane v1 → v2: What Changed
+
+Each of these was confirmed against the current docs and CLI while building this
+repo:
+
+| Topic | v1 | v2 (this repo) |
+|---|---|---|
+| Reacting to composed-resource changes | polling (realtime compositions were alpha) | watches by default, guarded by a per-XR circuit breaker (`Responsive` condition) |
+| XRD | `apiextensions.crossplane.io/v1`, cluster-scoped XR + namespaced **claim** | `apiextensions.crossplane.io/v2`, `scope: Namespaced` XR, **no claims** |
+| XR "Ready to use" condition | `Offered` (claims) | only `Established`, because there are no claims |
+| Composition selection | `spec.compositionSelector` | `spec.crossplane.compositionSelector` |
+| Composition mode | `Resources` (native patch-and-transform) or `Pipeline` | **Pipeline only**; P&T is a function |
+| What a Composition can create | managed resources (and provider-kubernetes `Object`s for anything else) | **any Kubernetes resource** directly, in the XR's namespace |
+| XR connection secrets | `writeConnectionSecretToRef` | removed; compose a `Secret` |
+| Managed resources | cluster-scoped | namespaced `.m.` groups (`helm.m.crossplane.io`, `kubernetes.m.crossplane.io`); `providerConfigRef` takes a `kind` (`ProviderConfig` or `ClusterProviderConfig`) |
+| Provider runtime config | `ControllerConfig` | `DeploymentRuntimeConfig` |
+| Package registry | implicit default (`xpkg.upbound.io`) | **no default**; fully qualified (`xpkg.crossplane.io/...`) |
+| CLI | `crossplane beta render`, `beta trace`, `beta validate`, `--version` | `crossplane composition render`, `resource trace`, `resource validate`, `crossplane version` (the CLI now lives in `crossplane/cli`) |
+
+## Evolution from Crossplane-AWS-Demo
+
+| | [Crossplane-AWS-Demo](https://github.com/elveli/Crossplane-AWS-Demo) | crossplane-local-demo |
+|---|---|---|
+| Cluster | Terraform-built VPC + EKS | Docker Desktop's built-in Kubernetes (or kind) |
+| Crossplane | chart 1.15.0 (v1) | chart **2.4.3** (v2) |
+| Credentials | AWS credentials file in a Secret (`make aws-secret`) | **none**; `InjectedIdentity` |
+| Providers | Upbound AWS family v1.14.0 (S3, RDS, IAM, DynamoDB) | provider-helm v1.5.0, provider-kubernetes v1.4.1 (Phase 6 adds AWS family v2.10.0 against LocalStack) |
+| Abstraction | **raw managed resources**: developers write `Bucket`, `Instance`, … with region, instance class and tags | a **platform API**: developers write a five-field `App`; the platform team owns the Composition |
+| Database | RDS `Instance` with a hand-created password Secret | CNPG Postgres per App, credentials generated and composed into a Secret |
+| Policy | none beyond provider schemas | XRD schema (enums, bounds, required fields), tested offline |
+| Testing | none | golden-file `render` tests and `resource validate` in `make test` |
+| Cost | ~$0.25/h plus resources | $0 |
+
+The step up has two parts.
+
+1. **From managed resources to a platform API.** In the old repo, each developer
+   needed to know AWS details: regions, instance classes, which secret to create
+   first. Here they request an outcome (`database.enabled: true, size: small`), and
+   the Composition encodes the platform team's choices. Two Compositions serve the
+   same API, and swapping implementations doesn't change the developer's YAML.
+2. **From real AWS to fully local.** The same reconciliation loop (drift correction,
+   cascading deletes, status) is demonstrated in about 0.5 GiB of RAM with nothing to
+   pay for and nothing to leak. Nothing in this repo references real AWS endpoints,
+   account IDs or credentials.
+
+Conventions carried over: numbered manifests (`01-…04-` like `1-…6-`), Makefile
+`*-status` and `logs-*` targets, and this README's structure.
+
+## Troubleshooting
+
+**Providers or functions stuck `HEALTHY=False` with pods in `ImagePullBackOff`**
+`kubectl describe pod` shows `short read: expected 641 bytes but got 0: unexpected EOF`.
+Docker Desktop's kind node pulls every image through a built-in mirror
+(`registry-mirror:1273`, see `/etc/containerd/certs.d/_default/hosts.toml` on the
+node), and it fails on `xpkg.crossplane.io` images that aren't already in the
+engine's cache. `make providers` runs `scripts/prepull.sh` first. To fix pods that
+are already stuck:
+
+```bash
+CLUSTER=docker-desktop ./scripts/prepull.sh packages
+kubectl --context docker-desktop -n crossplane-system delete pod -l pkg.crossplane.io/provider
+kubectl --context docker-desktop -n crossplane-system delete pod -l pkg.crossplane.io/function
+```
+
+**RBAC denies (`... is forbidden: User "system:serviceaccount:crossplane-system:provider-…"`)**
+Check `crossplane resource trace app/<name> -n <ns> --context docker-desktop`, then
+`make rbac-audit`.
+- `cannot patch resource "clusters"` from provider-kubernetes means it's running with
+  server-side apply enabled. Confirm that `--no-enable-server-side-apply` is in its
+  pod args. (kingpin flags reject `--flag=false`, and the pod crash-loops with
+  `unexpected false`.)
+- If Crossplane core can't create a kind you added to a Composition, add it to
+  `crossplane/apis/crossplane-rbac.yaml`.
+
+**Pods `Pending` or `OOMKilled`**
+`kubectl describe pod` shows `Insufficient memory` or `OOMKilled`. Check how much
+memory Docker has (`docker info --format '{{.MemTotal}}'`) and raise it under
+Settings → Resources. Other kind clusters or labs running in Docker compete for the
+same memory, so stop them with `docker stop <container>`. Prefer
+`database.size: small`, avoid `app-prod` (2 Postgres instances), or set
+`database.enabled: false`.
+
+**Slow image pulls or CPU throttling on Intel**
+The first `make up` pulls about 1 GB. Pre-pulling (`scripts/prepull.sh packages|cnpg|app`)
+moves that cost out of pod start-up. If Postgres or providers start slowly,
+`kubectl top` isn't available here, so use
+`kubectl get --raw /api/v1/nodes/desktop-control-plane/proxy/stats/summary`.
+Give Docker 4+ CPUs. CPU limits are generous (500m for providers), so throttling
+usually means Docker itself is CPU-starved.
+
+**`curl localhost:<port>` returns something unexpected or nothing**
+- Check that another process isn't holding the port:
+  `lsof -nP -iTCP:<port> -sTCP:LISTEN`. A process bound to `127.0.0.1` (rclone on
+  8080 was seen here) takes precedence over Docker Desktop's `*:<port>`.
+  `demo.sh` detects this and port-forwards instead.
+- After changing `servicePort` or `expose` on a running App, Docker Desktop **doesn't
+  rebind** the LoadBalancer port. Delete the Service and Crossplane recreates it
+  within seconds:
+  `kubectl --context docker-desktop -n team-a delete svc <app>`.
+- On kind, LoadBalancer Services stay `<pending>`, so use `expose: false` and
+  `kubectl port-forward`.
+
+**An App change takes ~30–60 s (or minutes) to show up**
+Check `kubectl get app <name> -o jsonpath='{.status.conditions[?(@.type=="Responsive")]}'`.
+`WatchCircuitOpen` means a burst of events from a composed resource tripped the XR's
+circuit breaker (see [How It Works](#watch-circuit-breaker-new-in-v2)). Reconciles
+continue about every 30 s until the cooldown ends (1 m here, 5 m by default). The
+Crossplane logs show `Circuit breaker is open` with `triggered-by` and
+`next-allowed-at`. If it keeps reopening on a quiet system, something is writing the
+composed resource in a loop: compare `--show-managed-fields` timestamps.
+
+**`make apis` waits forever on `Offered`**
+v2 namespaced XRDs have no claims, so they never get `Offered`. Wait for
+`Established` only.
+
+**`crossplane version` talks to the wrong cluster**
+It has no `--context` flag and uses your current context. `make crossplane-status`
+runs it against a generated `.local/kubeconfig` that contains only the local context.
+
+## Cleanup
+
+```bash
+make down    # docker-desktop: remove only what this demo installed, then verify; kind: delete the cluster
+make nuke    # down + remove the demo's images from Docker + .local/
+```
+
+`make down` deletes, in order:
+1. Apps, so the providers can uninstall Helm releases.
+2. Demo namespaces (labelled `app.kubernetes.io/part-of=crossplane-local-demo`).
+3. Compositions and the XRD.
+4. ProviderConfigs, providers and functions, along with their CRDs.
+5. The CNPG operator and its CRDs.
+6. Crossplane, including the CRDs and webhook it creates at runtime, which
+   `helm uninstall` leaves behind.
+
+It finishes by checking for leftover CRDs, ClusterRoles, webhooks and namespaces, and
+fails if it finds any. On the reference machine it takes about 30 s, and your other
+workloads on the docker-desktop cluster are untouched.
+
+## Pinned Versions
+
+All pins live in [`versions.env`](versions.env) (checked on 2026-11-20 against GitHub
+releases and the Helm repos). `make check-versions` fails if a manifest disagrees.
+
+| Component | Version |
+|---|---|
+| Crossplane (Helm chart) | 2.4.3 |
+| provider-kubernetes / provider-helm | v1.4.1 / v1.5.0 |
+| function-patch-and-transform / go-templating / auto-ready | v0.11.2 / v0.13.2 / v0.7.3 |
+| CloudNativePG operator chart / app · cluster chart | 0.29.2 / 1.30.2 · 0.9.0 |
+| PostgreSQL image | `ghcr.io/cloudnative-pg/postgresql:18.7-minimal-trixie` |
+| App image | `nginxdemos/hello:plain-text` |
+| provider-upjet-aws (Phase 6, optional) | v2.10.0 |
+
+## Quick Reference Cheat Sheet
+
+```bash
+# lifecycle
+make up | make demo | make test | make down
+# what did Crossplane build for my App?
+crossplane resource trace app/hello -n team-a --context docker-desktop
+kubectl --context docker-desktop get app -A
+kubectl --context docker-desktop -n team-a get deploy,svc,secret,releases.helm.m.crossplane.io,objects.kubernetes.m.crossplane.io
+# offline
+crossplane composition render examples/hello.yaml crossplane/compositions/app-dev.yaml \
+  crossplane/functions/functions.yaml --xrd crossplane/apis/app-xrd.yaml
+UPDATE=1 tests/render-test.sh     # accept intended Composition changes
+# health
+make status | make rbac-audit | make logs-helm | make logs-kubernetes
+```

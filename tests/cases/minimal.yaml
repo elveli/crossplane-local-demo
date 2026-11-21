@@ -1,0 +1,10 @@
+# Only the required field: exercises XRD defaults (replicas 1, port 80,
+# expose false -> ClusterIP, database disabled). Rendered with --xrd so the
+# defaults are applied exactly as the API server would.
+apiVersion: platform.demo.io/v1alpha1
+kind: App
+metadata:
+  name: minimal
+  namespace: team-a
+spec:
+  image: nginxdemos/hello:plain-text

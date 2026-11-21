@@ -18,7 +18,7 @@ CNPG_NS := cnpg-system
 LOCAL_KCFG := .local/kubeconfig
 
 .DEFAULT_GOAL := help
-.PHONY: help up crossplane providers cnpg apis demo demo-auto crossplane-status providers-status status \
+.PHONY: help up crossplane providers cnpg apis demo demo-auto render test down nuke crossplane-status providers-status status \
         rbac-audit check-versions logs-crossplane logs-kubernetes logs-helm logs-cnpg
 
 help:
@@ -30,6 +30,10 @@ help:
 	@printf "  %-24s %s\n" "make apis" "XRD (App API) + dev/prod Compositions + RBAC"
 	@printf "  %-24s %s\n" "make demo" "Narrated, paused demo (7 scenes; Enter to advance)"
 	@printf "  %-24s %s\n" "make demo-auto" "Same demo without pauses (testing/recording)"
+	@printf "  %-24s %s\n" "make render" "Offline: render examples through the Compositions (no cluster)"
+	@printf "  %-24s %s\n" "make test" "Offline: versions, shellcheck, golden renders, schema validation"
+	@printf "  %-24s %s\n" "make down" "Remove everything this demo installed (kind: delete the cluster)"
+	@printf "  %-24s %s\n" "make nuke" "down + remove pulled demo images from Docker + local state"
 	@printf "  %-24s %s\n" "make status" "Crossplane pods, packages, ProviderConfigs"
 	@printf "  %-24s %s\n" "make crossplane-status" "Show Crossplane pods, release, version"
 	@printf "  %-24s %s\n" "make providers-status" "Show providers/functions health"
@@ -87,6 +91,35 @@ demo:
 
 demo-auto:
 	CLUSTER=$(CLUSTER) DEMO_AUTO=1 ./scripts/demo.sh
+
+# ---- offline (Docker needed for functions, no cluster) ----
+render:
+	crossplane composition render examples/hello.yaml crossplane/compositions/app-dev.yaml \
+	  crossplane/functions/functions.yaml --xrd crossplane/apis/app-xrd.yaml
+	@echo "--- with simulated 'Postgres ready' observed state:"
+	crossplane composition render examples/hello.yaml crossplane/compositions/app-dev.yaml \
+	  crossplane/functions/functions.yaml --xrd crossplane/apis/app-xrd.yaml \
+	  --observed-resources tests/fixtures/observed-db-ready.yaml | grep -E '^kind:|^  name:|dbReady|connectionSecret'
+
+test: check-versions
+	@if command -v shellcheck >/dev/null; then shellcheck -S warning scripts/*.sh tests/*.sh && echo "ok       shellcheck"; \
+	 else echo "skip     shellcheck (brew install shellcheck)"; fi
+	./tests/render-test.sh
+	./tests/validate.sh
+
+# ---- teardown ----
+down:
+ifeq ($(CLUSTER),kind)
+	kind delete cluster --name $(KIND_CLUSTER_NAME)
+else
+	./scripts/down.sh
+endif
+
+nuke: down
+	@echo "== removing demo images from the Docker engine (prepull + render)"
+	@docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^(xpkg\.crossplane\.io/crossplane(-contrib)?/|ghcr\.io/cloudnative-pg/|nginxdemos/hello:)' \
+	  | xargs -r docker rmi -f >/dev/null && echo "   done" || true
+	rm -rf .local
 
 crossplane-status:
 	$(K) get pods -n $(XP_NS)

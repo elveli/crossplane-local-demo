@@ -1,0 +1,191 @@
+---
+apiVersion: platform.demo.io/v1alpha1
+kind: App
+metadata:
+  name: hello-prod
+  namespace: team-a
+spec:
+  crossplane:
+    compositionSelector:
+      matchLabels:
+        platform.demo.io/env: prod
+    resourceRefs:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: hello-prod
+    - apiVersion: helm.m.crossplane.io/v1beta1
+      kind: Release
+      name: hello-prod-db
+    - apiVersion: policy/v1
+      kind: PodDisruptionBudget
+      name: hello-prod
+    - apiVersion: v1
+      kind: Service
+      name: hello-prod
+  database:
+    enabled: true
+    size: small
+  expose: true
+  image: nginxdemos/hello:plain-text
+  port: 80
+  replicas: 2
+  servicePort: 8090
+status:
+  conditions:
+  - lastTransitionTime: "2024-01-01T00:00:00Z"
+    reason: WatchCircuitClosed
+    status: "True"
+    type: Responsive
+  - lastTransitionTime: "2024-01-01T00:00:00Z"
+    reason: ReconcileSuccess
+    status: "True"
+    type: Synced
+  - lastTransitionTime: "2024-01-01T00:00:00Z"
+    message: 'Unready resources: db-release, deployment, pdb, and 1 more'
+    reason: Creating
+    status: "False"
+    type: Ready
+  connectionSecret: ""
+  dbReady: false
+  url: http://localhost:8090
+---
+apiVersion: helm.m.crossplane.io/v1beta1
+kind: Release
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: db-release
+  labels:
+    crossplane.io/composite: hello-prod
+  name: hello-prod-db
+  namespace: team-a
+  ownerReferences:
+  - apiVersion: platform.demo.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: App
+    name: hello-prod
+    uid: b9930e8a-7e22-5709-816f-48bc80433b32
+spec:
+  forProvider:
+    chart:
+      name: cluster
+      repository: https://cloudnative-pg.github.io/charts
+      version: 0.9.0
+    namespace: team-a
+    skipCreateNamespace: true
+    values:
+      cluster:
+        enablePDB: true
+        enableSuperuserAccess: false
+        imageName: ghcr.io/cloudnative-pg/postgresql:18.7-minimal-trixie
+        initdb:
+          database: app
+          owner: app
+        instances: 2
+        resources:
+          limits:
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 256Mi
+        storage:
+          size: 1Gi
+      fullnameOverride: hello-prod-db
+  providerConfigRef:
+    kind: ClusterProviderConfig
+    name: default
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: deployment
+  labels:
+    crossplane.io/composite: hello-prod
+  name: hello-prod
+  namespace: team-a
+  ownerReferences:
+  - apiVersion: platform.demo.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: App
+    name: hello-prod
+    uid: b9930e8a-7e22-5709-816f-48bc80433b32
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hello-prod
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hello-prod
+    spec:
+      containers:
+      - image: nginxdemos/hello:plain-text
+        livenessProbe:
+          periodSeconds: 10
+          tcpSocket:
+            port: http
+        name: app
+        ports:
+        - containerPort: 80
+          name: http
+        readinessProbe:
+          periodSeconds: 5
+          tcpSocket:
+            port: http
+        resources:
+          limits:
+            cpu: 500m
+            memory: 128Mi
+          requests:
+            cpu: 50m
+            memory: 32Mi
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: pdb
+  labels:
+    crossplane.io/composite: hello-prod
+  name: hello-prod
+  namespace: team-a
+  ownerReferences:
+  - apiVersion: platform.demo.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: App
+    name: hello-prod
+    uid: b9930e8a-7e22-5709-816f-48bc80433b32
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hello-prod
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: service
+  labels:
+    crossplane.io/composite: hello-prod
+  name: hello-prod
+  namespace: team-a
+  ownerReferences:
+  - apiVersion: platform.demo.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: App
+    name: hello-prod
+    uid: b9930e8a-7e22-5709-816f-48bc80433b32
+spec:
+  ports:
+  - name: http
+    port: 8090
+    targetPort: http
+  selector:
+    app.kubernetes.io/name: hello-prod
+  type: LoadBalancer

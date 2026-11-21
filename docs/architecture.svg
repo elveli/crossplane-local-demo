@@ -1,0 +1,192 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 780" width="1200" height="780" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12">
+  <title>crossplane-local-demo architecture</title>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#334155"/></marker>
+    <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1D4ED8"/></marker>
+    <marker id="ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#C2410C"/></marker>
+    <style>
+      .t  { fill:#0F172A; }
+      .s  { fill:#475569; font-size:11px; }
+      .h  { font-weight:600; font-size:13px; fill:#0F172A; }
+      .ns { font-weight:600; font-size:12px; fill:#475569; }
+      .m  { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11px; fill:#0F172A; }
+      .lbl{ font-size:10.5px; fill:#334155; }
+      .xp { fill:#EDE9FE; stroke:#6D28D9; }
+      .fn { fill:#CCFBF1; stroke:#0F766E; }
+      .pv { fill:#DBEAFE; stroke:#1D4ED8; }
+      .k8 { fill:#DCFCE7; stroke:#15803D; }
+      .pg { fill:#FFEDD5; stroke:#C2410C; }
+      .box{ stroke-width:1.4; }
+      .ln { stroke:#334155; stroke-width:1.4; fill:none; }
+      .obs{ stroke:#1D4ED8; stroke-width:1.4; fill:none; stroke-dasharray:5 4; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="780" fill="#FFFFFF"/>
+  <text x="20" y="34" font-size="18" font-weight="700" class="t">crossplane-local-demo — architecture</text>
+  <text x="400" y="34" class="s">Crossplane v2 platform API on Docker Desktop · no cloud credentials</text>
+
+  <!-- ===================== Mac host ===================== -->
+  <rect x="20" y="56" width="205" height="700" rx="10" fill="#F8FAFC" stroke="#64748B" stroke-width="1.4"/>
+  <text x="34" y="80" class="h">Mac (Intel x86_64)</text>
+  <text x="34" y="97" class="s">kubectl / helm / crossplane CLI</text>
+  <text x="34" y="111" class="s">always --context docker-desktop</text>
+
+  <rect x="32" y="140" width="181" height="54" rx="6" fill="#FFFFFF" stroke="#CBD5E1"/>
+  <text x="42" y="160" class="m">$ make up</text>
+  <text x="42" y="178" class="s">Crossplane, packages, API</text>
+
+  <rect x="32" y="222" width="181" height="70" rx="6" fill="#FFFFFF" stroke="#CBD5E1"/>
+  <text x="42" y="242" class="m">$ make test</text>
+  <text x="42" y="260" class="s">composition render +</text>
+  <text x="42" y="274" class="s">resource validate — offline,</text>
+  <text x="42" y="288" class="s">Docker only, no cluster</text>
+
+  <rect x="32" y="516" width="181" height="48" rx="6" fill="#FFFFFF" stroke="#CBD5E1"/>
+  <text x="42" y="536" class="m">$ kubectl apply -f</text>
+  <text x="42" y="553" class="m">  examples/hello.yaml</text>
+
+  <rect x="32" y="606" width="181" height="40" rx="6" fill="#FFFFFF" stroke="#CBD5E1"/>
+  <text x="42" y="631" class="m">$ curl localhost:80</text>
+
+  <!-- ===================== Docker Desktop ===================== -->
+  <rect x="245" y="56" width="935" height="700" rx="10" fill="#F0F9FF" stroke="#0284C7" stroke-width="1.6"/>
+  <text x="261" y="80" class="h">Docker Desktop · built-in Kubernetes v1.34 (kind provisioner) · context docker-desktop</text>
+
+  <!-- crossplane-system -->
+  <rect x="265" y="96" width="450" height="330" rx="8" fill="#FFFFFF" stroke="#94A3B8" stroke-dasharray="6 4"/>
+  <text x="279" y="116" class="ns">namespace crossplane-system</text>
+
+  <rect x="285" y="128" width="410" height="62" rx="7" class="xp box"/>
+  <text x="299" y="150" class="h">Crossplane v2.4.3</text>
+  <text x="299" y="167" class="s">reconciles XRs · runs Composition pipelines</text>
+  <text x="299" y="181" class="s">RBAC manager · package manager</text>
+
+  <rect x="322" y="232" width="118" height="62" rx="7" class="fn box"/>
+  <text x="331" y="251" class="t" font-weight="600" font-size="11.5">1 patch-and-</text>
+  <text x="331" y="265" class="t" font-weight="600" font-size="11.5">   transform</text>
+  <text x="331" y="283" class="s">Deploy · Svc · PDB</text>
+  <rect x="450" y="232" width="118" height="62" rx="7" class="fn box"/>
+  <text x="459" y="251" class="t" font-weight="600" font-size="11.5">2 go-templating</text>
+  <text x="459" y="268" class="s">DB · conn Secret</text>
+  <text x="459" y="283" class="s">XR status</text>
+  <rect x="578" y="232" width="118" height="62" rx="7" class="fn box"/>
+  <text x="587" y="251" class="t" font-weight="600" font-size="11.5">3 auto-ready</text>
+  <text x="587" y="268" class="s">XR Ready only if</text>
+  <text x="587" y="283" class="s">every part Ready</text>
+  <path d="M440,263 L448,263" class="ln" marker-end="url(#a)"/>
+  <path d="M568,263 L576,263" class="ln" marker-end="url(#a)"/>
+  <text x="322" y="310" class="lbl">Composition pipeline — app-dev | app-prod</text>
+  <path d="M509,190 L509,230" class="ln" marker-end="url(#a)"/>
+  <text x="515" y="214" class="lbl">gRPC</text>
+
+  <rect x="322" y="326" width="182" height="84" rx="7" class="pv box"/>
+  <text x="333" y="347" class="h">provider-helm v1.5.0</text>
+  <text x="333" y="364" class="s">installs cnpg/cluster chart</text>
+  <text x="333" y="379" class="s">RBAC: + CRUD on CNPG</text>
+  <text x="333" y="394" class="s">Clusters only</text>
+  <rect x="514" y="326" width="182" height="84" rx="7" class="pv box"/>
+  <text x="525" y="347" class="h">provider-kubernetes</text>
+  <text x="525" y="364" class="s">v1.4.1 · Observe-only Objects</text>
+  <text x="525" y="379" class="s">read-only RBAC</text>
+  <text x="525" y="394" class="s">(client-side apply mode)</text>
+
+  <!-- reconcile channel: Crossplane <-> App XR -->
+  <path d="M300,190 L300,488" class="ln" marker-start="url(#a)" marker-end="url(#a)"/>
+  <text x="306" y="320" class="lbl" transform="rotate(-90 306 320)" text-anchor="middle">watch &amp; reconcile</text>
+
+  <!-- cnpg-system -->
+  <rect x="735" y="96" width="425" height="104" rx="8" fill="#FFFFFF" stroke="#94A3B8" stroke-dasharray="6 4"/>
+  <text x="749" y="116" class="ns">namespace cnpg-system  (platform prerequisite)</text>
+  <rect x="755" y="128" width="385" height="58" rx="7" class="pg box"/>
+  <text x="769" y="150" class="h">CloudNativePG operator 1.30.2</text>
+  <text x="769" y="167" class="s">turns a Cluster CR into Postgres pods, Services, credentials</text>
+
+  <!-- ===================== team-a ===================== -->
+  <rect x="265" y="448" width="895" height="232" rx="8" fill="#FFFFFF" stroke="#94A3B8" stroke-dasharray="6 4"/>
+  <text x="279" y="468" class="ns">namespace team-a  (developer)</text>
+
+  <!-- App XR -->
+  <rect x="280" y="490" width="160" height="100" rx="8" class="xp box" stroke-width="2"/>
+  <text x="292" y="511" class="h">App/hello</text>
+  <text x="292" y="527" class="s">namespaced XR</text>
+  <text x="292" y="541" class="s">platform.demo.io/v1alpha1</text>
+  <text x="292" y="560" class="m">status.url</text>
+  <text x="292" y="575" class="m">status.dbReady</text>
+
+  <!-- composed group -->
+  <rect x="458" y="478" width="460" height="186" rx="8" fill="none" stroke="#6D28D9" stroke-dasharray="3 3"/>
+  <text x="470" y="674" class="lbl" fill="#6D28D9">composed resources — owned by App/hello, deleted with it</text>
+  <path d="M440,540 L456,540" class="ln" marker-end="url(#a)"/>
+
+  <!-- column B: native -->
+  <text x="470" y="494" class="lbl">native Kubernetes (composed directly)</text>
+  <rect x="470" y="500" width="195" height="44" rx="6" class="k8 box"/>
+  <text x="480" y="518" class="t" font-weight="600">Deployment hello</text>
+  <text x="480" y="534" class="s">2 replicas · nginxdemos/hello</text>
+  <rect x="470" y="552" width="195" height="44" rx="6" class="k8 box"/>
+  <text x="480" y="570" class="t" font-weight="600">Secret hello-db-conn</text>
+  <text x="480" y="586" class="s">host, port, dbname, user, pw, uri</text>
+  <rect x="470" y="604" width="195" height="44" rx="6" class="k8 box"/>
+  <text x="480" y="622" class="t" font-weight="600">Service hello</text>
+  <text x="480" y="638" class="s">LoadBalancer :80 (expose: true)</text>
+
+  <!-- column C: managed resources -->
+  <text x="690" y="494" class="lbl">managed resources (namespaced .m. APIs)</text>
+  <rect x="690" y="500" width="215" height="44" rx="6" class="pv box"/>
+  <text x="700" y="518" class="t" font-weight="600">Release hello-db</text>
+  <text x="700" y="534" class="s">helm.m.crossplane.io</text>
+  <rect x="690" y="552" width="215" height="44" rx="6" class="pv box" stroke-dasharray="5 3"/>
+  <text x="700" y="570" class="t" font-weight="600">Object hello-db-app-secret</text>
+  <text x="700" y="586" class="s">Observe → reads credentials</text>
+  <rect x="690" y="604" width="215" height="44" rx="6" class="pv box" stroke-dasharray="5 3"/>
+  <text x="700" y="622" class="t" font-weight="600">Object hello-db-cluster</text>
+  <text x="700" y="638" class="s">Observe → Ready → status.dbReady</text>
+
+  <!-- column D: created by CNPG -->
+  <text x="935" y="494" class="lbl" font-size="10">created by Helm + CNPG (not XR-owned)</text>
+  <rect x="935" y="500" width="210" height="44" rx="6" class="pg box"/>
+  <text x="945" y="518" class="t" font-weight="600">Cluster hello-db</text>
+  <text x="945" y="534" class="s">postgresql.cnpg.io/v1</text>
+  <rect x="935" y="552" width="210" height="44" rx="6" class="pg box"/>
+  <text x="945" y="570" class="t" font-weight="600">Secret hello-db-app</text>
+  <text x="945" y="586" class="s">generated credentials</text>
+  <rect x="935" y="604" width="210" height="44" rx="6" class="pg box"/>
+  <text x="945" y="622" class="t" font-weight="600">Pod hello-db-1</text>
+  <text x="945" y="638" class="s">PostgreSQL 18.7 · 1Gi PVC</text>
+
+  <!-- provider arrows -->
+  <path d="M413,410 L688,512" class="ln" stroke="#1D4ED8" marker-end="url(#ab)"/>
+  <text x="400" y="436" class="lbl" fill="#1D4ED8">reconciles Release</text>
+  <path d="M605,410 L686,552" class="obs" marker-end="url(#ab)"/>
+  <text x="628" y="432" class="lbl" fill="#1D4ED8">observes</text>
+
+  <!-- MR -> CNPG objects -->
+  <path d="M905,522 L933,522" class="ln" marker-end="url(#a)"/>
+  <text x="904" y="514" class="lbl" font-size="9.5">helm</text>
+  <path d="M933,574 L907,574" class="obs" marker-end="url(#ab)"/>
+  <path d="M905,626 L933,540" class="obs" marker-end="url(#ab)"/>
+  <!-- credentials copied into the composed Secret -->
+  <path d="M690,574 L667,574" class="obs" marker-end="url(#ab)"/>
+
+  <!-- operator -> Cluster -->
+  <path d="M1128,186 L1128,498" class="ln" stroke="#C2410C" marker-end="url(#ao)"/>
+  <text x="1120" y="330" class="lbl" fill="#C2410C" text-anchor="end">reconciles Cluster,</text>
+  <text x="1120" y="344" class="lbl" fill="#C2410C" text-anchor="end">creates pod + Secret</text>
+
+  <!-- Mac -> cluster -->
+  <path d="M213,540 L278,540" class="ln" marker-end="url(#a)"/>
+  <path d="M213,626 L468,626" class="ln" stroke="#15803D" marker-end="url(#a)"/>
+  <text x="300" y="618" class="lbl" fill="#15803D">LoadBalancer → localhost:80</text>
+
+  <!-- ===================== legend ===================== -->
+  <g transform="translate(265,700)">
+    <rect x="0" y="0" width="895" height="42" rx="6" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <rect x="14" y="14" width="14" height="14" rx="3" class="xp box"/><text x="34" y="25" class="s">Crossplane / XR</text>
+    <rect x="140" y="14" width="14" height="14" rx="3" class="fn box"/><text x="160" y="25" class="s">composition functions</text>
+    <rect x="300" y="14" width="14" height="14" rx="3" class="pv box"/><text x="320" y="25" class="s">providers / managed resources</text>
+    <rect x="490" y="14" width="14" height="14" rx="3" class="k8 box"/><text x="510" y="25" class="s">native Kubernetes</text>
+    <rect x="630" y="14" width="14" height="14" rx="3" class="pg box"/><text x="650" y="25" class="s">CloudNativePG</text>
+    <path d="M750,21 L790,21" class="obs"/><text x="798" y="25" class="s">observe-only</text>
+  </g>
+</svg>

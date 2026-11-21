@@ -1,0 +1,7 @@
+# MUST FAIL validation: size is an enum (small|medium).
+apiVersion: platform.demo.io/v1alpha1
+kind: App
+metadata: { name: bad-size, namespace: team-a }
+spec:
+  image: nginxdemos/hello:plain-text
+  database: { enabled: true, size: huge }

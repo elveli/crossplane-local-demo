@@ -1,0 +1,109 @@
+---
+apiVersion: platform.demo.io/v1alpha1
+kind: App
+metadata:
+  name: minimal
+  namespace: team-a
+spec:
+  crossplane:
+    resourceRefs:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: minimal
+    - apiVersion: v1
+      kind: Service
+      name: minimal
+  database:
+    enabled: false
+    size: small
+  expose: false
+  image: nginxdemos/hello:plain-text
+  port: 80
+  replicas: 1
+status:
+  conditions:
+  - lastTransitionTime: "2024-01-01T00:00:00Z"
+    reason: WatchCircuitClosed
+    status: "True"
+    type: Responsive
+  - lastTransitionTime: "2024-01-01T00:00:00Z"
+    reason: ReconcileSuccess
+    status: "True"
+    type: Synced
+  - lastTransitionTime: "2024-01-01T00:00:00Z"
+    message: 'Unready resources: deployment, service'
+    reason: Creating
+    status: "False"
+    type: Ready
+  connectionSecret: ""
+  dbReady: false
+  url: http://minimal.team-a.svc.cluster.local:80
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: deployment
+  labels:
+    crossplane.io/composite: minimal
+  name: minimal
+  namespace: team-a
+  ownerReferences:
+  - apiVersion: platform.demo.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: App
+    name: minimal
+    uid: f4472595-a56e-5d73-9886-604dd4d4c1e1
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: minimal
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: minimal
+    spec:
+      containers:
+      - image: nginxdemos/hello:plain-text
+        name: app
+        ports:
+        - containerPort: 80
+          name: http
+        readinessProbe:
+          periodSeconds: 5
+          tcpSocket:
+            port: http
+        resources:
+          limits:
+            cpu: 200m
+            memory: 64Mi
+          requests:
+            cpu: 10m
+            memory: 16Mi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    crossplane.io/composition-resource-name: service
+  labels:
+    crossplane.io/composite: minimal
+  name: minimal
+  namespace: team-a
+  ownerReferences:
+  - apiVersion: platform.demo.io/v1alpha1
+    blockOwnerDeletion: true
+    controller: true
+    kind: App
+    name: minimal
+    uid: f4472595-a56e-5d73-9886-604dd4d4c1e1
+spec:
+  ports:
+  - name: http
+    port: 80
+    targetPort: http
+  selector:
+    app.kubernetes.io/name: minimal
+  type: ClusterIP

@@ -71,6 +71,12 @@ elif lsof -nP -iTCP:"$PORT" -sTCP:LISTEN 2>/dev/null | awk 'NR>1 && $1 !~ /^com\
   note "127.0.0.1:$PORT is taken by another process -> will use kubectl port-forward instead"
   ACCESS=port-forward
 fi
+# kind has no LoadBalancer implementation: an exposed App's Service would stay
+# <pending> forever, and function-auto-ready (correctly) never marks it Ready.
+APP_YAML=$(cat examples/hello.yaml)
+if [[ "$CLUSTER" == kind ]]; then
+  APP_YAML=$(sed 's/expose: true/expose: false/' <<<"$APP_YAML")
+fi
 if k -n "$NS" get app "$APP" >/dev/null 2>&1; then
   note "Removing a leftover App/$APP from a previous run..."
   k -n "$NS" delete app "$APP" --wait=true --timeout=180s >/dev/null
@@ -89,7 +95,12 @@ pause
 # ================================================================= 1
 scene "1/7  Request an App and watch it come up"
 run "cat examples/hello.yaml"
-run "k apply -f examples/namespace.yaml -f examples/hello.yaml"
+if [[ "$CLUSTER" == kind ]]; then
+  note "kind: applying with expose: false (no LoadBalancer on kind; scene 2 uses port-forward)"
+  run "k apply -f examples/namespace.yaml && sed 's/expose: true/expose: false/' examples/hello.yaml | k apply -f -"
+else
+  run "k apply -f examples/namespace.yaml -f examples/hello.yaml"
+fi
 say "Watching the XR (SYNCED → READY). Postgres takes ~1 minute on a laptop:"
 show "kubectl get app -n $NS -w"
 # kubectl directly, not via the k() function: backgrounding a function
@@ -155,6 +166,15 @@ pause
 
 # ================================================================= 4
 scene "4/7  Change propagation: edit the App, not the resources"
+# Crossplane v2 has a per-XR watch circuit breaker: a burst of watch events on
+# composed resources (scene 3's churn) opens it and throttles that XR's
+# reconciles for ~1 min. The XR reports it as condition Responsive=False.
+if [[ "$(k -n "$NS" get app "$APP" -o jsonpath='{.status.conditions[?(@.type=="Responsive")].status}')" != True ]]; then
+  note "Scene 3's churn tripped Crossplane's watch circuit breaker for App/$APP (Responsive=False)."
+  note "It protects the control plane from hot loops; waiting for it to close..."
+  wait_until 180 "circuit closed (Responsive=True)" \
+    '[[ "$(k -n "$NS" get app "$APP" -o jsonpath="{.status.conditions[?(@.type==\"Responsive\")].status}")" == True ]]'
+fi
 say "Scale through the platform API (spec.replicas 2 → 3):"
 run "k -n $NS patch app $APP --type merge -p '{\"spec\":{\"replicas\":3}}'"
 wait_until 120 "Deployment now has 3 available replicas" \
@@ -172,13 +192,13 @@ pause
 scene "5/7  Policy-like validation: the XRD schema is the contract"
 say "Ask for a database size the platform doesn't offer:"
 show 'sed "s/size: small/size: huge/" examples/hello.yaml | kubectl apply -f -'
-if sed 's/size: small/size: huge/' examples/hello.yaml | k apply -f - 2>&1; then
+if sed 's/size: small/size: huge/' <<<"$APP_YAML" | k apply -f - 2>&1; then
   echo "  ✘ expected the API server to reject this" >&2; exit 1
 fi
 ok "Rejected by the API server -- Crossplane never even saw it"
 say "Same for out-of-range replicas:"
 show 'sed "s/replicas: 2/replicas: 50/" examples/hello.yaml | kubectl apply -f -'
-if sed 's/replicas: 2/replicas: 50/' examples/hello.yaml | k apply -f - 2>&1; then
+if sed 's/replicas: 2/replicas: 50/' <<<"$APP_YAML" | k apply -f - 2>&1; then
   echo "  ✘ expected the API server to reject this" >&2; exit 1
 fi
 ok "Rejected (maximum: 10)"

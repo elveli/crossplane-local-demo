@@ -18,3 +18,12 @@ resourcesRBACManager:
   limits:
     cpu: 100m
     memory: 512Mi
+
+# Crossplane v2 guards each XR with a watch circuit breaker: more than `burst`
+# watch events (refilling at `refill-rate`/s) from its composed resources opens
+# it, and while open the XR is reconciled only every ~30s for `cooldown`.
+# The demo's drift scene (scale 5 -> 2, delete + recreate) can trip it, which
+# then delays the next scene by up to 5 minutes with the default cooldown.
+# 1m keeps the demo flowing; keep the 5m default in production.
+args:
+  - --circuit-breaker-cooldown=1m
