@@ -1,0 +1,48 @@
+# Simulated *observed* composed resources for `crossplane composition render
+# --observed-resources`: what the cluster looks like once Postgres is up.
+# Lets us test the database branch (connection Secret, status.dbReady) offline.
+# All values are dummies -- nothing here is a real credential.
+apiVersion: helm.m.crossplane.io/v1beta1
+kind: Release
+metadata:
+  name: hello-db
+  namespace: team-a
+  annotations:
+    crossplane.io/composition-resource-name: db-release
+status:
+  conditions:
+    - { type: Ready, status: "True", reason: Available }
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  name: hello-db-cluster
+  namespace: team-a
+  annotations:
+    crossplane.io/composition-resource-name: db-cluster
+status:
+  conditions:
+    - { type: Ready, status: "True", reason: Available }
+---
+apiVersion: kubernetes.m.crossplane.io/v1alpha1
+kind: Object
+metadata:
+  name: hello-db-app-secret
+  namespace: team-a
+  annotations:
+    crossplane.io/composition-resource-name: db-app-secret
+status:
+  conditions:
+    - { type: Ready, status: "True", reason: Available }
+  atProvider:
+    manifest:
+      apiVersion: v1
+      kind: Secret
+      metadata: { name: hello-db-app, namespace: team-a }
+      data:
+        host: aGVsbG8tZGItcnc=
+        port: NTQzMg==
+        dbname: YXBw
+        username: YXBw
+        password: ZHVtbXktbm90LWEtcmVhbC1wYXNzd29yZA==
+        uri: cG9zdGdyZXNxbDovL2FwcDpkdW1teS1ub3QtYS1yZWFsLXBhc3N3b3JkQGhlbGxvLWRiLXJ3LnRlYW0tYTo1NDMyL2FwcA==

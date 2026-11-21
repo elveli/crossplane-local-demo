@@ -18,7 +18,7 @@ CNPG_NS := cnpg-system
 LOCAL_KCFG := .local/kubeconfig
 
 .DEFAULT_GOAL := help
-.PHONY: help up crossplane providers cnpg apis crossplane-status providers-status status \
+.PHONY: help up crossplane providers cnpg apis demo demo-auto crossplane-status providers-status status \
         rbac-audit check-versions logs-crossplane logs-kubernetes logs-helm logs-cnpg
 
 help:
@@ -28,6 +28,8 @@ help:
 	@printf "  %-24s %s\n" "make crossplane" "Install/upgrade Crossplane via Helm (pinned)"
 	@printf "  %-24s %s\n" "make providers" "Providers, functions, RBAC, ProviderConfigs, CNPG operator"
 	@printf "  %-24s %s\n" "make apis" "XRD (App API) + dev/prod Compositions + RBAC"
+	@printf "  %-24s %s\n" "make demo" "Narrated, paused demo (7 scenes; Enter to advance)"
+	@printf "  %-24s %s\n" "make demo-auto" "Same demo without pauses (testing/recording)"
 	@printf "  %-24s %s\n" "make status" "Crossplane pods, packages, ProviderConfigs"
 	@printf "  %-24s %s\n" "make crossplane-status" "Show Crossplane pods, release, version"
 	@printf "  %-24s %s\n" "make providers-status" "Show providers/functions health"
@@ -79,6 +81,12 @@ apis: check-versions
 	$(K) wait --for=condition=Established --timeout=120s xrd/apps.platform.demo.io
 	$(K) apply -f crossplane/compositions/
 	$(K) get xrd,compositions
+
+demo:
+	CLUSTER=$(CLUSTER) ./scripts/demo.sh
+
+demo-auto:
+	CLUSTER=$(CLUSTER) DEMO_AUTO=1 ./scripts/demo.sh
 
 crossplane-status:
 	$(K) get pods -n $(XP_NS)
