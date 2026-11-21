@@ -1,0 +1,43 @@
+# Phase 6 (optional): AWS *family* providers (one small provider per service),
+# not the old monolithic provider-aws. Versions must match versions.env.
+#
+# provider-family-aws owns the shared ProviderConfig CRDs; s3 and dynamodb
+# depend on it. Installing it explicitly pins it (the members only ask for
+# ">= 0.0.0") and gives it our runtime config (incl. the egress guard).
+#
+# The NAME matters: Crossplane's dependency manager looks for a Provider named
+# after the package path (crossplane-contrib-provider-family-aws). Under any
+# other name it installs a second copy itself -- with the *default* runtime
+# config, i.e. without the egress guard, and outside our manifests.
+# `make aws` applies this one first and waits for it to be Healthy.
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: crossplane-contrib-provider-family-aws
+spec:
+  package: xpkg.crossplane.io/crossplane-contrib/provider-family-aws:v2.10.0
+  runtimeConfigRef:
+    name: provider-aws
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-aws-s3
+  labels:
+    platform.demo.io/aws-member: "true"
+spec:
+  package: xpkg.crossplane.io/crossplane-contrib/provider-aws-s3:v2.10.0
+  runtimeConfigRef:
+    name: provider-aws
+---
+apiVersion: pkg.crossplane.io/v1
+kind: Provider
+metadata:
+  name: provider-aws-dynamodb
+  labels:
+    platform.demo.io/aws-member: "true"
+spec:
+  package: xpkg.crossplane.io/crossplane-contrib/provider-aws-dynamodb:v2.10.0
+  runtimeConfigRef:
+    name: provider-aws

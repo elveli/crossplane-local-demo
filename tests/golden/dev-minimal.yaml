@@ -5,6 +5,7 @@ metadata:
   name: minimal
   namespace: team-a
 spec:
+  bucket: false
   crossplane:
     resourceRefs:
     - apiVersion: apps/v1
@@ -20,7 +21,10 @@ spec:
   image: nginxdemos/hello:plain-text
   port: 80
   replicas: 1
+  table: false
 status:
+  awsConfig: ""
+  bucket: ""
   conditions:
   - lastTransitionTime: "2024-01-01T00:00:00Z"
     reason: WatchCircuitClosed
@@ -37,6 +41,7 @@ status:
     type: Ready
   connectionSecret: ""
   dbReady: false
+  table: ""
   url: http://minimal.team-a.svc.cluster.local:80
 ---
 apiVersion: apps/v1

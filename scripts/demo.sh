@@ -170,10 +170,17 @@ scene "4/7  Change propagation: edit the App, not the resources"
 # composed resources (scene 3's churn) opens it and throttles that XR's
 # reconciles for ~1 min. The XR reports it as condition Responsive=False.
 if [[ "$(k -n "$NS" get app "$APP" -o jsonpath='{.status.conditions[?(@.type=="Responsive")].status}')" != True ]]; then
-  note "Scene 3's churn tripped Crossplane's watch circuit breaker for App/$APP (Responsive=False)."
-  note "It protects the control plane from hot loops; waiting for it to close..."
-  wait_until 180 "circuit closed (Responsive=True)" \
-    '[[ "$(k -n "$NS" get app "$APP" -o jsonpath="{.status.conditions[?(@.type==\"Responsive\")].status}")" == True ]]'
+  note "Creating the App + scene 3's churn tripped Crossplane's watch circuit breaker for App/$APP (Responsive=False)."
+  note "It protects the control plane from hot loops. It re-closes after the cooldown"
+  note "(1m here), but the condition only refreshes on the App's *next* reconcile -- a quiet"
+  note "App may not get one. So we touch an annotation every 10s to give it that event."
+  t0=$SECONDS
+  until [[ "$(k -n "$NS" get app "$APP" -o jsonpath='{.status.conditions[?(@.type=="Responsive")].status}')" == True ]]; do
+    (( SECONDS - t0 > 180 )) && { echo "  ✘ circuit still open after 180s" >&2; exit 1; }
+    k -n "$NS" annotate app "$APP" demo.platform.demo.io/nudge="$SECONDS" --overwrite >/dev/null
+    sleep 10
+  done
+  ok "circuit closed (Responsive=True)  ($((SECONDS - t0))s)"
 fi
 say "Scale through the platform API (spec.replicas 2 → 3):"
 run "k -n $NS patch app $APP --type merge -p '{\"spec\":{\"replicas\":3}}'"

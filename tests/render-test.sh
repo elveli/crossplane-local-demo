@@ -16,6 +16,9 @@ CASES=(
   "dev-hello-db-ready|examples/hello.yaml|crossplane/compositions/app-dev.yaml|$DB_READY"
   "prod-hello|examples/hello-prod.yaml|crossplane/compositions/app-prod.yaml|"
   "prod-hello-db-ready|examples/hello-prod.yaml|crossplane/compositions/app-prod.yaml|$DB_READY"
+  # Phase 6: S3 bucket + DynamoDB table (dev: plain; prod: + versioning, PITR)
+  "dev-shop-aws|examples/hello-aws.yaml|crossplane/compositions/app-dev.yaml|"
+  "prod-shop-aws|examples/hello-aws.yaml|crossplane/compositions/app-prod.yaml|"
 )
 
 fail=0

@@ -1,0 +1,7 @@
+# MUST FAIL validation: bucket is a boolean (Phase 6), not a name.
+apiVersion: platform.demo.io/v1alpha1
+kind: App
+metadata: { name: bad-bucket, namespace: team-a }
+spec:
+  image: nginxdemos/hello:plain-text
+  bucket: my-bucket

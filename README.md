@@ -4,7 +4,10 @@ A self-contained **Crossplane v2** platform-engineering demo that runs entirely 
 **Docker Desktop** (built for Intel Macs). It needs no cloud account and no credentials.
 A developer creates one small `App` object, and the platform turns it into a
 Deployment, a Service, a PostgreSQL database and a connection Secret. It then keeps
-them in the declared state.
+them in the declared state. An optional
+[AWS flavour](#optional-aws-flavour-on-localstack-phase-6) adds an S3 bucket and a
+DynamoDB table to the same API, using the provider-aws family against LocalStack. It
+still needs no account.
 
 It's the sequel to [Crossplane-AWS-Demo](https://github.com/elveli/Crossplane-AWS-Demo),
 which used raw managed resources against real AWS (see
@@ -22,6 +25,7 @@ which used raw managed resources against real AWS (see
 - [Makefile Command Reference](#makefile-command-reference)
 - [The Demo, Scene by Scene](#the-demo-scene-by-scene)
 - [How It Works](#how-it-works)
+- [Optional: AWS Flavour on LocalStack (Phase 6)](#optional-aws-flavour-on-localstack-phase-6)
 - [Offline Testing](#offline-testing)
 - [Crossplane v1 → v2: What Changed](#crossplane-v1--v2-what-changed)
 - [Evolution from Crossplane-AWS-Demo](#evolution-from-crossplane-aws-demo)
@@ -55,6 +59,7 @@ From that one object, Crossplane builds and maintains:
 | PostgreSQL 18.7 | **provider-helm** `Release` installs the CloudNativePG `cluster` chart | `size` sets CPU, memory and storage |
 | `Secret <app>-db-conn` | composed from the database credentials, which **provider-kubernetes** reads with observe-only access | `host`, `port`, `dbname`, `username`, `password`, `uri` |
 | `status.url`, `status.dbReady`, `status.availableReplicas`, `status.connectionSecret` | written back to the App by the Composition | `kubectl get app` shows them as columns |
+| *optional:* S3 `Bucket`, DynamoDB `Table`, `ConfigMap <app>-aws` | `bucket: true` / `table: true`, via the **provider-aws family** against **LocalStack** (`make aws`) | see [Phase 6](#optional-aws-flavour-on-localstack-phase-6) |
 
 There are two implementations of the same API: **`app-dev`** (the default) and
 **`app-prod`** (2 Postgres instances, PodDisruptionBudgets, bigger requests). An App
@@ -117,13 +122,16 @@ sequenceDiagram
 ├── cluster/
 │   ├── crossplane-values.yaml     # Helm values: laptop-sized requests
 │   ├── cnpg-values.yaml           # CloudNativePG operator values
-│   └── kind-config.yaml           # CLUSTER=kind fallback
+│   ├── kind-config.yaml           # CLUSTER=kind fallback
+│   └── localstack.yaml            # Phase 6: LocalStack 4.14.0 in-cluster
 ├── crossplane/
 │   ├── providers/
 │   │   ├── 01-runtime-config.yaml # DeploymentRuntimeConfigs (named SAs, resources, args)
 │   │   ├── 02-providers.yaml      # provider-kubernetes, provider-helm
 │   │   ├── 03-rbac.yaml           # the extra provider permissions (and why)
-│   │   └── 04-providerconfigs.yaml# ClusterProviderConfigs, InjectedIdentity
+│   │   ├── 04-providerconfigs.yaml# ClusterProviderConfigs, InjectedIdentity
+│   │   └── aws/                   # Phase 6: runtime config (egress guard), family
+│   │                              #   providers, LocalStack ClusterProviderConfig
 │   ├── functions/functions.yaml   # patch-and-transform, go-templating, auto-ready
 │   ├── apis/
 │   │   ├── app-xrd.yaml           # the App API (v2 XRD, scope: Namespaced)
@@ -131,11 +139,12 @@ sequenceDiagram
 │   └── compositions/
 │       ├── app-dev.yaml           # default implementation
 │       └── app-prod.yaml          # HA-ish implementation (select by label)
-├── examples/                      # namespace.yaml, hello.yaml, hello-prod.yaml
+├── examples/                      # namespace, hello, hello-prod; hello-aws + aws-writer (Phase 6)
 ├── scripts/
 │   ├── cluster-up.sh              # preflight + CLUSTER=docker-desktop|kind
 │   ├── prepull.sh                 # Docker Desktop registry-mirror workaround
 │   ├── demo.sh                    # the narrated 7-scene demo
+│   ├── demo-aws.sh                # Phase 6: 5-scene S3/DynamoDB demo
 │   └── down.sh                    # ordered teardown + leftover check
 ├── tests/
 │   ├── render-test.sh             # golden-file tests (crossplane composition render)
@@ -168,6 +177,7 @@ memory is tight, create Apps with `database.enabled: false`.
 ```bash
 brew install kubectl helm crossplane    # crossplane CLI >= 2.5 (new command names)
 brew install kind shellcheck            # optional: kind fallback, script linting
+brew install awscli awscli-local        # optional, Phase 6: aws CLI + awslocal wrapper
 ```
 
 ## Quick Start (5 minutes)
@@ -212,6 +222,11 @@ nodes pull directly rather than through Docker Desktop's mirror. Verified: `make
 | `make providers` | Pre-pull images, DeploymentRuntimeConfigs, providers, RBAC, functions, ProviderConfigs, CNPG operator |
 | `make apis` | XRD, both Compositions, Crossplane RBAC |
 | `make demo` / `make demo-auto` | 7-scene narrated demo, with or without pauses |
+| `make aws` | Phase 6: LocalStack, provider-aws family (s3, dynamodb), LocalStack ClusterProviderConfig |
+| `make demo-aws` / `make demo-aws-auto` | Phase 6: 5-scene S3/DynamoDB demo |
+| `make aws-status` | Phase 6: AWS providers, ProviderConfig, managed resources, and what LocalStack holds |
+| `make localstack-forward` | Phase 6: port-forward LocalStack to `localhost:4566` (kind) |
+| `make logs-aws` / `make logs-localstack` | Phase 6: provider-aws pods / LocalStack request log |
 | `make render` | Offline: render `examples/hello.yaml`, plain and with "Postgres ready" observed state |
 | `make test` | Offline: `check-versions`, shellcheck, golden renders, schema validation |
 | `make status` | Packages, Crossplane and CNPG pods, ProviderConfigs |
@@ -235,7 +250,7 @@ reference Intel Mac.
 | 1 | Request an App | `kubectl get app -w` goes SYNCED, then READY; `crossplane resource trace` shows the full tree; the status JSON | ~65 s |
 | 2 | Use it from the Mac | `curl localhost:80` spread across both replicas; decoded connection Secret; a real `psql` login with those credentials | — |
 | 3 | Drift correction | `kubectl scale --replicas=5` is reverted to 2 (`metadata.generation` 1 → 3, and the managed-fields table shows Crossplane as the last writer); `kubectl delete deploy` is recreated with a new UID | 0–3 s |
-| 4 | Change propagation | `spec.replicas: 3` rolls out; `database.enabled: false` removes the Release, Cluster, observers and Secret. If scene 3 tripped the XR's watch circuit breaker, the script waits for it first (≤ ~60 s, narrated) | 3 s / ~60 s |
+| 4 | Change propagation | `spec.replicas: 3` rolls out; `database.enabled: false` removes the Release, Cluster, observers and Secret. If the XR's watch circuit breaker tripped, the script waits for it first, nudging the App so the condition refreshes (~70 s, narrated) | 3 s / ~70 s |
 | 5 | Validation | `size: huge` and `replicas: 50` are rejected by the API server | — |
 | 6 | Offline render | `crossplane composition render`: plain, with simulated observed state (the connection Secret appears), and the prod Composition | — |
 | 7 | Delete | `kubectl delete app` removes everything the App created | ~2 s |
@@ -310,8 +325,15 @@ at 1/s) opens it. While it's open, the XR is reconciled only about every 30 s, a
 reports `Responsive=False, reason: WatchCircuitOpen` ("Too many watch events from
 Deployment/hello"). The default cooldown is **5 minutes**. This demo sets
 `--circuit-breaker-cooldown=1m` in `cluster/crossplane-values.yaml`, because the
-drift scene can trip it and 5 minutes is too long to wait in a live demo. Keep the
-default in production.
+drift scene (or even the burst of events while an App is being created) can trip
+it, and 5 minutes is too long to wait in a live demo. Keep the default in production.
+
+**The condition can go stale.** After the cooldown, the breaker has closed, but
+`Responsive=False` stays on the XR until its *next* reconcile writes the status again.
+A quiet App may not get one for a long time. In one test run the condition still said
+`WatchCircuitOpen` 3 minutes after a 1-minute cooldown, and a single annotation change
+flipped it to `Responsive=True` within a second. Scene 4 therefore touches a harmless
+annotation (`demo.platform.demo.io/nudge`) every 10 s while it waits.
 
 ### `expose`: why LoadBalancer
 
@@ -362,6 +384,147 @@ effective permissions:
   get nodes                                        no
 ```
 
+## Optional: AWS Flavour on LocalStack (Phase 6)
+
+The same `App` API gets two more fields. With them, the Composition also creates
+AWS resources, provisioned by the **provider-aws family** (one small provider per
+service, not the old monolith) against **LocalStack**, an AWS API emulator running in
+the cluster. There's still no AWS account and no credentials, and
+[nothing can reach real AWS](#guardrails-nothing-reaches-real-aws).
+
+```yaml
+spec:
+  image: nginxdemos/hello:plain-text
+  bucket: true    # S3 bucket  <namespace>-<name>
+  table: true     # DynamoDB table <namespace>-<name> (hash key id, on-demand)
+```
+
+```bash
+make up && make aws     # + LocalStack and provider-family-aws/-s3/-dynamodb (~75 s)
+make demo-aws           # 5 narrated scenes (~2.5 min)
+make aws-status         # providers, ProviderConfig, MRs, LocalStack's contents
+```
+
+| Composed resource | dev (`app-dev`) | prod (`app-prod`) |
+|---|---|---|
+| `Bucket` (`s3.aws.m.upbound.io/v1beta1`) | ✔ `forceDestroy`, tags | ✔ |
+| `BucketVersioning` | — | ✔ `Enabled` |
+| `Table` (`dynamodb.aws.m.upbound.io/v1beta1`) | ✔ `PAY_PER_REQUEST`, hash key `id`, tags | ✔ + point-in-time recovery |
+| `ConfigMap <app>-aws` | `AWS_ENDPOINT_URL`, `AWS_REGION`, `AWS_DEFAULT_REGION`, `S3_BUCKET`, `DYNAMODB_TABLE`, for `envFrom` | same |
+| App status | `bucket`, `table`, `awsConfig` | same |
+
+The `Bucket` and `Table` specs started as Crossplane-AWS-Demo's `3-s3-bucket.yaml`
+and `6-dynamodb-table.yaml`. They became v2 **namespaced** managed resources (`.m.`
+groups, `providerConfigRef: {kind: ClusterProviderConfig, name: localstack}`). The
+v1beta1 schemas of the namespaced kinds use objects where v1 used one-element lists
+(e.g. `pointInTimeRecovery: {enabled: true}`). The real bucket and table names come
+from the `crossplane.io/external-name` annotation. Apps without `bucket`/`table`
+render none of this, so they work even if `make aws` never ran.
+
+### The Phase 6 demo, scene by scene
+
+| # | Scene | What you see | Time |
+|---|---|---|---|
+| 1 | Guardrails | the family providers; the ClusterProviderConfig (static endpoint, service list, `skip_*`, dummy keys); the provider pods' `HTTPS_PROXY` backstop | — |
+| 2 | Request | `hello-aws.yaml` (`shop`) becomes Ready; `trace` shows Deployment, Service, Bucket, Table, ConfigMap | ~30–60 s |
+| 3 | Check from the Mac | `awslocal s3 ls`, `dynamodb list-tables`, and the bucket's `crossplane-*` tags on the "cloud" side | — |
+| 4 | A workload uses it | a pod whose only AWS settings come from `envFrom: shop-aws` writes `hi.txt` and item `order-1`; both are visible from the Mac | ~6 s |
+| 5 | Drift and turning off | `s3 rb --force` behind Crossplane's back → bucket re-created; `table: false` → table deleted; delete the App → LocalStack is empty | ~42 s / 1 s / ~31 s |
+
+The bucket is re-created when provider-aws-s3 next polls: `--poll=1m` in
+`crossplane/providers/aws/01-runtime-config.yaml` (the default, 10m, is right for real
+AWS, where every poll is a billed API call). Restarting LocalStack wipes its in-memory
+state, and the providers re-create everything on their next poll. That's the same
+mechanism, seen during development.
+
+**Verify by hand.** On Docker Desktop, LocalStack's `localstack-external` LoadBalancer
+is `localhost:4566`; on kind, run `make localstack-forward`:
+
+```bash
+export AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-west-2 \
+       AWS_CONFIG_FILE=/dev/null AWS_SHARED_CREDENTIALS_FILE=/dev/null  # never your ~/.aws
+awslocal s3 ls                      # or: aws --endpoint-url http://localhost:4566 s3 ls
+awslocal dynamodb list-tables
+```
+
+### Guardrails: nothing reaches real AWS
+
+Four independent layers. The last one exists because the first one alone wasn't
+enough (see below).
+
+1. **Endpoint overrides.** The `localstack` ClusterProviderConfig sets
+   `endpoint.url.static` to LocalStack's in-cluster Service and lists the services
+   explicitly: `s3`, `s3control`, `dynamodb`, `sts`, `iam`. *Services not listed keep
+   the real AWS endpoints.*
+2. **No AWS lookups.** `skip_credentials_validation`, `skip_requesting_account_id`,
+   `skip_metadata_api_check` and `skip_region_validation` turn off the calls a
+   provider normally makes at startup.
+3. **Dummy credentials.** `test`/`test`, LocalStack's documented keys, are useless
+   against AWS. The ProviderConfig is named `localstack`, not `default`, so an AWS
+   managed resource that forgets `providerConfigRef` fails instead of going anywhere.
+4. **Egress backstop.** The provider pods run with `HTTPS_PROXY=http://127.0.0.1:9` (a
+   closed port), with `NO_PROXY` covering only cluster-internal addresses, and
+   `AWS_ENDPOINT_URL` pointing to LocalStack as an SDK-level catch-all. Every real AWS
+   endpoint is HTTPS, so a call that slips past layer 1 fails *inside the pod* with
+   `proxyconnect tcp: dial tcp 127.0.0.1:9: connect: connection refused`. LocalStack is
+   plain HTTP on a cluster Service and isn't affected. The guard lives in the
+   `provider-aws` DeploymentRuntimeConfig, so it only applies to Providers that
+   reference it. `make aws` installs the family Provider first, under the exact name
+   Crossplane's dependency manager looks for (`crossplane-contrib-provider-family-aws`),
+   and checks that only one exists. If a member provider ever exists without its
+   family, the dependency manager installs the family **itself**, with the *default*
+   runtime config (no guard). This was observed during teardown, which is why
+   `make down` deletes the members first and waits for them before removing the
+   family. Verified on a fresh install: all three AWS pods carry `HTTPS_PROXY` and
+   use the `provider-aws` runtime config, both after `make aws` and after both demos.
+
+**Why layer 4 exists.** In the first version, the services list was `s3, dynamodb,
+sts, iam`. provider-aws-s3 v2.10.0 (Terraform AWS provider 6.x) reads bucket tags
+through the separate **S3 Control** API (`ListTagsForResource`). That service wasn't
+listed, so the call went to the real AWS S3 Control endpoint for `us-west-2`.
+AWS rejected it with `403 AccessDenied` (dummy keys, no account), but it still left the
+machine. After adding the backstop, the exact same configuration was re-applied as a
+test. The same call then failed in-pod with the `proxyconnect … connection refused`
+error. Over the following runs, including a full `make demo-aws`, the provider logs
+contained zero `proxyconnect` entries and no real AWS hostnames.
+
+**The S3 Control hostname trick.** S3 Control puts the account ID in front of the
+endpoint host, so the provider asks for
+`000000000000.localstack.localstack.svc.cluster.local`. (`000000000000` is the account
+ID the provider assumes with `skip_requesting_account_id`, and also LocalStack's
+default.) Kubernetes can serve that name without touching the cluster DNS config: the
+LocalStack pod sets `hostname: "000000000000"` and `subdomain: localstack`, and the
+`localstack` Service is headless. That is why there are two Services, `localstack`
+(headless, for providers) and `localstack-external` (LoadBalancer, for the Mac).
+
+### Why LocalStack 4.14.0
+
+LocalStack's releases since the end of March 2026 use CalVer (`2026.03.0` …). They
+require a `LOCALSTACK_AUTH_TOKEN` (a free "Hobby" tier exists for non-commercial
+use). Without one, the image exits with code 55 and *"LocalStack pro features can only
+be used with a valid license."* This was verified on 2026-11-20: `latest` exits;
+**`4.14.0`** (the last SemVer release, built 2026-02-26) starts as the
+`community` edition with S3, S3 Control, DynamoDB, STS and IAM. The demo pins it, so
+it needs no account or token. If you later want a newer LocalStack, put a token in a
+Secret, not in this repo.
+
+### Footprint and timings
+
+Measured on the reference Intel Mac (Docker Desktop VM: 16 CPUs, 15.6 GiB):
+
+| | |
+|---|---|
+| provider-family-aws / -s3 / -dynamodb, idle | ~380 / ~390 / ~420 MiB (the family peaked at ~850 MiB during startup, so the limit is 1.5 GiB) |
+| LocalStack, idle | ~300 MiB |
+| **Phase 6 total** | **~1.5 GiB** on top of the base demo |
+| `make aws` | ~75 s with cached images; about 4.5 min on the first run (package unpacking) |
+| App with bucket + table Ready | 26–61 s across runs |
+| `make demo-aws-auto` | 2m04s–2m38s |
+| `make down` with Phase 6 installed | ~63 s |
+
+With less than 8 GB for Docker Desktop, create Apps with `database.enabled: false`
+while Phase 6 runs.
+
 ## Offline Testing
 
 `make test` needs Docker, because functions run as local containers, but no cluster:
@@ -374,7 +537,10 @@ ok       render dev-hello
 ok       render dev-hello-db-ready     # tests/fixtures/observed-db-ready.yaml
 ok       render prod-hello
 ok       render prod-hello-db-ready
-ok       validate: Total 30 resources: 0 missing schemas, 30 success cases, 0 failure cases
+ok       render dev-shop-aws           # Phase 6: Bucket + Table + ConfigMap
+ok       render prod-shop-aws          # + BucketVersioning, point-in-time recovery
+ok       validate: Total 45 resources: 0 missing schemas, 45 success cases, 0 failure cases
+ok       rejects invalid-bucket.yaml: spec.bucket: Invalid value: "string": … must be of type boolean
 ok       rejects invalid-missing-image.yaml: spec.image: Required value
 ok       rejects invalid-replicas.yaml: spec.replicas: Invalid value: 50 …
 ok       rejects invalid-size.yaml: spec.database.size: Unsupported value: "huge" …
@@ -388,7 +554,9 @@ ok       rejects invalid-size.yaml: spec.database.size: Unsupported value: "huge
   up" so the database branch (connection Secret, `dbReady`) is tested without a
   cluster.
 - **`crossplane resource validate`** checks examples and every golden render against
-  the XRD and the CRDs downloaded from the pinned provider packages. The
+  the XRD and the CRDs downloaded from the pinned provider packages (including the
+  provider-aws S3 and DynamoDB CRDs, so a wrong field in a composed `Bucket` fails
+  offline). The
   `invalid-*.yaml` cases must fail.
 
 ## Crossplane v1 → v2: What Changed
@@ -417,7 +585,8 @@ repo:
 | Cluster | Terraform-built VPC + EKS | Docker Desktop's built-in Kubernetes (or kind) |
 | Crossplane | chart 1.15.0 (v1) | chart **2.4.3** (v2) |
 | Credentials | AWS credentials file in a Secret (`make aws-secret`) | **none**; `InjectedIdentity` |
-| Providers | Upbound AWS family v1.14.0 (S3, RDS, IAM, DynamoDB) | provider-helm v1.5.0, provider-kubernetes v1.4.1 (Phase 6 adds AWS family v2.10.0 against LocalStack) |
+| Providers | Upbound AWS family v1.14.0 (S3, RDS, IAM, DynamoDB) | provider-helm v1.5.0, provider-kubernetes v1.4.1; Phase 6 adds the AWS family **v2.10.0** (S3, DynamoDB) against LocalStack |
+| S3 / DynamoDB | hand-written cluster-scoped `Bucket` and `Table` (`3-s3-bucket.yaml`, `6-dynamodb-table.yaml`), real AWS, `us-east-1` | the same specs (tags, `PAY_PER_REQUEST`, hash key `id`) as **namespaced v2 MRs inside the App Composition**, toggled by `bucket: true` / `table: true`, on LocalStack |
 | Abstraction | **raw managed resources**: developers write `Bucket`, `Instance`, … with region, instance class and tags | a **platform API**: developers write a five-field `App`; the platform team owns the Composition |
 | Database | RDS `Instance` with a hand-created password Secret | CNPG Postgres per App, credentials generated and composed into a Secret |
 | Policy | none beyond provider schemas | XRD schema (enums, bounds, required fields), tested offline |
@@ -510,6 +679,23 @@ v2 namespaced XRDs have no claims, so they never get `Offered`. Wait for
 It has no `--context` flag and uses your current context. `make crossplane-status`
 runs it against a generated `.local/kubeconfig` that contains only the local context.
 
+**Phase 6: a `Bucket` stays `SYNCED=False` with `... S3 Control: ListTagsForResource ...`**
+provider-aws-s3 reads bucket tags through the separate S3 Control API, which puts the
+account ID in front of the endpoint host (`000000000000.localstack.localstack.svc…`).
+Check that `s3control` is in both the ClusterProviderConfig's `endpoint.services` and
+LocalStack's `SERVICES`, and that the LocalStack pod has `hostname: "000000000000"` and
+`subdomain: localstack` with the headless `localstack` Service (`cluster/localstack.yaml`).
+A `501` in `make logs-localstack` means LocalStack has the service disabled.
+
+**Phase 6: `proxyconnect tcp: dial tcp 127.0.0.1:9: connect: connection refused`**
+That's the egress guard doing its job: an AWS call tried to reach a real
+AWS endpoint and was stopped inside the provider pod. Add the service to
+`endpoint.services` in `crossplane/providers/aws/03-providerconfig.yaml` (and to
+LocalStack's `SERVICES`).
+
+**Phase 6: LocalStack exits with code 55 / "valid license" after changing the tag**
+Releases from 2026.03 on need `LOCALSTACK_AUTH_TOKEN`. Keep `4.14.0` (see below).
+
 ## Cleanup
 
 ```bash
@@ -518,16 +704,23 @@ make nuke    # down + remove the demo's images from Docker + .local/
 ```
 
 `make down` deletes, in order:
-1. Apps, so the providers can uninstall Helm releases.
-2. Demo namespaces (labelled `app.kubernetes.io/part-of=crossplane-local-demo`).
+1. Apps, then waits until every composed managed resource is gone (AWS managed
+   resources need LocalStack to finish deleting; Helm releases need their namespace).
+2. Demo namespaces (labelled `app.kubernetes.io/part-of=crossplane-local-demo`,
+   including `localstack`).
 3. Compositions and the XRD.
-4. ProviderConfigs, providers and functions, along with their CRDs.
+4. ProviderConfigs, providers and functions, plus (if `make aws` ran) the AWS
+   providers, the dummy-credentials Secret and LocalStack. It waits until every
+   package revision has finalized; uninstalling Crossplane earlier would orphan
+   their finalizers.
 5. The CNPG operator and its CRDs.
 6. Crossplane, including the CRDs and webhook it creates at runtime, which
    `helm uninstall` leaves behind.
 
+`make down` is safe to rerun on a partly or fully cleaned cluster.
+
 It finishes by checking for leftover CRDs, ClusterRoles, webhooks and namespaces, and
-fails if it finds any. On the reference machine it takes about 30 s, and your other
+fails if it finds any. On the reference machine it takes about 30 s (about 1 min with Phase 6 installed), and your other
 workloads on the docker-desktop cluster are untouched.
 
 ## Pinned Versions
@@ -543,7 +736,8 @@ releases and the Helm repos). `make check-versions` fails if a manifest disagree
 | CloudNativePG operator chart / app · cluster chart | 0.29.2 / 1.30.2 · 0.9.0 |
 | PostgreSQL image | `ghcr.io/cloudnative-pg/postgresql:18.7-minimal-trixie` |
 | App image | `nginxdemos/hello:plain-text` |
-| provider-upjet-aws (Phase 6, optional) | v2.10.0 |
+| provider-upjet-aws family: provider-family-aws, provider-aws-s3, provider-aws-dynamodb (Phase 6, optional) | v2.10.0 |
+| LocalStack (Phase 6, optional) | `localstack/localstack:4.14.0` (last release that runs without an account) |
 
 ## Quick Reference Cheat Sheet
 
@@ -560,4 +754,8 @@ crossplane composition render examples/hello.yaml crossplane/compositions/app-de
 UPDATE=1 tests/render-test.sh     # accept intended Composition changes
 # health
 make status | make rbac-audit | make logs-helm | make logs-kubernetes
+# Phase 6 (optional)
+make aws | make demo-aws | make aws-status | make logs-localstack
+AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_CONFIG_FILE=/dev/null \
+  awslocal s3 ls            # or: aws --endpoint-url http://localhost:4566 s3 ls
 ```

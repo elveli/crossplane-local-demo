@@ -1,0 +1,81 @@
+# Phase 6 (optional): LocalStack, an AWS API emulator, running in the cluster.
+#
+# In-cluster (rather than a separate `docker run`) so the providers reach it by
+# Service DNS on both Docker Desktop and kind, and `make down` removes it with
+# everything else. Docker Desktop forwards the LoadBalancer port to the Mac,
+# so `awslocal` (which defaults to http://localhost:4566) just works; on kind
+# use `make localstack-forward`.
+#
+# Two Services:
+#  - `localstack` (headless) -- what the providers use. Together with the pod's
+#    hostname/subdomain below it also creates the DNS name
+#    000000000000.localstack.localstack.svc.cluster.local: the S3 Control API
+#    (used by provider-aws-s3 for bucket tags) prefixes the account ID to the
+#    endpoint host, and 000000000000 is the account ID the provider assumes
+#    with skip_requesting_account_id (also LocalStack's default account).
+#  - `localstack-external` (LoadBalancer) -- localhost:4566 on the Mac.
+#
+# State is in-memory: restarting the pod "loses" all buckets/tables, and the
+# AWS providers recreate them on their next poll (a free drift demo).
+# Image tag must match versions.env (tests/check-versions.sh).
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: localstack
+  labels:
+    app.kubernetes.io/part-of: crossplane-local-demo
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: localstack
+  namespace: localstack
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/name: localstack }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: localstack }
+    spec:
+      hostname: "000000000000"   # see the S3 Control note above
+      subdomain: localstack      # = headless Service name
+      containers:
+        - name: localstack
+          image: localstack/localstack:4.14.0
+          env:
+            - { name: SERVICES, value: "s3,s3control,dynamodb,sts,iam" }   # start only what we use
+            - { name: EAGER_SERVICE_LOADING, value: "1" }        # ready = really ready
+            - { name: DISABLE_EVENTS, value: "1" }               # no analytics calls home
+            - { name: SKIP_SSL_CERT_DOWNLOAD, value: "1" }       # no outbound cert fetch
+          ports:
+            - { name: edge, containerPort: 4566 }
+          readinessProbe:
+            httpGet: { path: /_localstack/health, port: edge }
+            periodSeconds: 5
+          resources:
+            requests: { cpu: 50m, memory: 256Mi }
+            limits: { cpu: "1", memory: 1Gi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: localstack
+  namespace: localstack
+spec:
+  clusterIP: None         # headless: enables the <hostname>.<subdomain> pod DNS record
+  selector: { app.kubernetes.io/name: localstack }
+  ports:
+    - { name: edge, port: 4566, targetPort: edge }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: localstack-external
+  namespace: localstack
+spec:
+  type: LoadBalancer      # Docker Desktop: localhost:4566 on the Mac
+  selector: { app.kubernetes.io/name: localstack }
+  ports:
+    - { name: edge, port: 4566, targetPort: edge }

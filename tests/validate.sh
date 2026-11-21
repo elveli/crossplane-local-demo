@@ -9,12 +9,14 @@ source versions.env
 
 EXT=$(mktemp -d); RES=$(mktemp -d)
 trap 'rm -rf "$EXT" "$RES"' EXIT
+# Provider packages: their CRDs are the schemas for composed MRs (incl. Phase 6 AWS).
 cp crossplane/apis/app-xrd.yaml crossplane/providers/02-providers.yaml "$EXT/"
+cp crossplane/providers/aws/02-providers.yaml "$EXT/aws-providers.yaml"
 VALIDATE=(crossplane resource validate "$EXT" --crossplane-image "$XPKG_REGISTRY/crossplane/crossplane:v$CROSSPLANE_VERSION")
 
 fail=0
 # 1) positive: Apps from examples/ + all golden renders
-cp examples/hello.yaml examples/hello-prod.yaml tests/cases/minimal.yaml "$RES/"
+cp examples/hello.yaml examples/hello-prod.yaml examples/hello-aws.yaml tests/cases/minimal.yaml "$RES/"
 cp tests/golden/*.yaml "$RES/"
 if out=$("${VALIDATE[@]}" "$RES" --error-on-missing-schemas 2>&1); then
   echo "ok       validate: $(grep '^Total' <<<"$out")"

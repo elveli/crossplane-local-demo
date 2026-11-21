@@ -8,7 +8,7 @@
 # EOF" unless the engine already has the image cached -> pods stuck in
 # ImagePullBackOff. Pulling on the host first makes the mirror serve from cache.
 #
-# Usage: scripts/prepull.sh <group>   groups: packages | cnpg | app
+# Usage: scripts/prepull.sh <group>   groups: packages | cnpg | app | localstack | aws
 set -euo pipefail
 cd "$(dirname "$0")/.."
 source versions.env
@@ -27,6 +27,11 @@ case "${1:-packages}" in
       "ghcr.io/cloudnative-pg/cloudnative-pg:$CNPG_OPERATOR_VERSION"
       "$POSTGRES_IMAGE") ;;
   app) imgs=("$APP_IMAGE") ;;
+  localstack) imgs=("$LOCALSTACK_IMAGE") ;;
+  aws) imgs=(
+      "$R/provider-family-aws:$PROVIDER_AWS_VERSION"
+      "$R/provider-aws-s3:$PROVIDER_AWS_VERSION"
+      "$R/provider-aws-dynamodb:$PROVIDER_AWS_VERSION") ;;
   *) echo "unknown group $1" >&2; exit 1 ;;
 esac
 

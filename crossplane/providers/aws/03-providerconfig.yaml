@@ -1,0 +1,51 @@
+# Phase 6 (optional): point the AWS providers at LocalStack -- never at AWS.
+#
+# Three independent guards keep every call local:
+#  1. endpoint.url.static + an explicit services list: the provider's SDK
+#     clients for s3/s3control/dynamodb/sts/iam use LocalStack's in-cluster URL.
+#     (The list matters: services not listed keep the real AWS endpoints --
+#     e.g. provider-aws-s3 also calls the separate S3 Control API for tags.)
+#  2. The skip_* flags turn off the startup calls a provider normally makes to
+#     real AWS (STS credential check, account-ID lookup, EC2 metadata API).
+#  3. The credentials are LocalStack's documented dummy keys (test/test); they
+#     are useless against real AWS.
+#  4. Backstop, independent of this file: the provider pods' HTTPS egress goes
+#     to a dead-end proxy (see 01-runtime-config.yaml).
+# And it's named `localstack`, not `default`: an AWS managed resource that
+# forgets providerConfigRef looks for ClusterProviderConfig/default, finds
+# nothing, and fails instead of going anywhere else.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: localstack-dummy-creds
+  namespace: crossplane-system
+type: Opaque
+stringData:
+  credentials: |
+    [default]
+    aws_access_key_id = test
+    aws_secret_access_key = test
+---
+apiVersion: aws.m.upbound.io/v1beta1
+kind: ClusterProviderConfig
+metadata:
+  name: localstack
+spec:
+  credentials:
+    source: Secret
+    secretRef:
+      namespace: crossplane-system
+      name: localstack-dummy-creds
+      key: credentials
+  endpoint:
+    url:
+      type: Static
+      static: http://localstack.localstack.svc.cluster.local:4566
+    services: [s3, s3control, dynamodb, sts, iam]
+    hostnameImmutable: true
+  s3_use_path_style: true            # http://host/bucket, not http://bucket.host
+  skip_credentials_validation: true
+  skip_metadata_api_check: true
+  skip_requesting_account_id: true
+  skip_region_validation: true

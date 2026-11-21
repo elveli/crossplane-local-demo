@@ -17,6 +17,14 @@ check crossplane/providers/02-providers.yaml provider-helm                "$PROV
 check crossplane/functions/functions.yaml    function-patch-and-transform "$FUNCTION_PATCH_AND_TRANSFORM_VERSION"
 check crossplane/functions/functions.yaml    function-go-templating       "$FUNCTION_GO_TEMPLATING_VERSION"
 check crossplane/functions/functions.yaml    function-auto-ready          "$FUNCTION_AUTO_READY_VERSION"
+for p in provider-family-aws provider-aws-s3 provider-aws-dynamodb; do
+  check crossplane/providers/aws/02-providers.yaml "$p" "$PROVIDER_AWS_VERSION"
+done
+for f in cluster/localstack.yaml examples/aws-writer.yaml; do
+  grep -q "image: $LOCALSTACK_IMAGE\$" "$f" \
+    && printf 'ok    %-32s %s\n' "localstack image ($(basename "$f"))" "${LOCALSTACK_IMAGE##*:}" \
+    || { printf 'FAIL  localstack image in %s != %s\n' "$f" "$LOCALSTACK_IMAGE"; fail=1; }
+done
 for comp in crossplane/compositions/app-*.yaml; do
   grep -q "version: \"$CNPG_CLUSTER_CHART_VERSION\"" "$comp" \
     && printf 'ok    %-32s %s\n' "cnpg/cluster chart ($(basename "$comp"))" "$CNPG_CLUSTER_CHART_VERSION" \

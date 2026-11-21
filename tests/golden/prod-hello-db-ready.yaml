@@ -5,6 +5,7 @@ metadata:
   name: hello-prod
   namespace: team-a
 spec:
+  bucket: false
   crossplane:
     compositionSelector:
       matchLabels:
@@ -39,7 +40,10 @@ spec:
   port: 80
   replicas: 2
   servicePort: 8090
+  table: false
 status:
+  awsConfig: ""
+  bucket: ""
   conditions:
   - lastTransitionTime: "2024-01-01T00:00:00Z"
     reason: WatchCircuitClosed
@@ -56,6 +60,7 @@ status:
     type: Ready
   connectionSecret: hello-prod-db-conn
   dbReady: true
+  table: ""
   url: http://localhost:8090
 ---
 apiVersion: v1

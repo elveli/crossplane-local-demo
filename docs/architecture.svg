@@ -3,6 +3,7 @@
   <defs>
     <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#334155"/></marker>
     <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1D4ED8"/></marker>
+    <marker id="aa" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#B45309"/></marker>
     <marker id="ao" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#C2410C"/></marker>
     <style>
       .t  { fill:#0F172A; }
@@ -16,6 +17,7 @@
       .pv { fill:#DBEAFE; stroke:#1D4ED8; }
       .k8 { fill:#DCFCE7; stroke:#15803D; }
       .pg { fill:#FFEDD5; stroke:#C2410C; }
+      .aw { fill:#FEF3C7; stroke:#B45309; }
       .box{ stroke-width:1.4; }
       .ln { stroke:#334155; stroke-width:1.4; fill:none; }
       .obs{ stroke:#1D4ED8; stroke-width:1.4; fill:none; stroke-dasharray:5 4; }
@@ -41,6 +43,14 @@
   <text x="42" y="260" class="s">composition render +</text>
   <text x="42" y="274" class="s">resource validate — offline,</text>
   <text x="42" y="288" class="s">Docker only, no cluster</text>
+
+  <!-- Phase 6 (optional) host commands -->
+  <rect x="32" y="318" width="181" height="54" rx="6" fill="#FFFBEB" stroke="#B45309" stroke-dasharray="5 3"/>
+  <text x="42" y="338" class="m">$ make aws</text>
+  <text x="42" y="356" class="s">optional: LocalStack + AWS family</text>
+  <rect x="32" y="388" width="181" height="54" rx="6" fill="#FFFBEB" stroke="#B45309" stroke-dasharray="5 3"/>
+  <text x="42" y="408" class="m">$ awslocal s3 ls</text>
+  <text x="42" y="426" class="s">→ localhost:4566 (LoadBalancer)</text>
 
   <rect x="32" y="516" width="181" height="48" rx="6" fill="#FFFFFF" stroke="#CBD5E1"/>
   <text x="42" y="536" class="m">$ kubectl apply -f</text>
@@ -171,22 +181,38 @@
 
   <!-- operator -> Cluster -->
   <path d="M1128,186 L1128,498" class="ln" stroke="#C2410C" marker-end="url(#ao)"/>
-  <text x="1120" y="330" class="lbl" fill="#C2410C" text-anchor="end">reconciles Cluster,</text>
-  <text x="1120" y="344" class="lbl" fill="#C2410C" text-anchor="end">creates pod + Secret</text>
+  <text x="1144" y="325" class="lbl" fill="#C2410C" text-anchor="middle" transform="rotate(90 1144 325)">reconciles Cluster · creates pod + Secret</text>
 
   <!-- Mac -> cluster -->
   <path d="M213,540 L278,540" class="ln" marker-end="url(#a)"/>
   <path d="M213,626 L468,626" class="ln" stroke="#15803D" marker-end="url(#a)"/>
   <text x="300" y="618" class="lbl" fill="#15803D">LoadBalancer → localhost:80</text>
 
+
+  <!-- ===================== Phase 6 (optional) ===================== -->
+  <rect x="735" y="212" width="374" height="226" rx="8" fill="#FFFBEB" stroke="#B45309" stroke-width="1.4" stroke-dasharray="6 4"/>
+  <text x="749" y="232" class="ns" fill="#B45309">Phase 6 · optional (make aws) · no real AWS</text>
+  <rect x="751" y="242" width="342" height="66" rx="6" class="aw box"/>
+  <text x="763" y="261" class="h">provider-aws family v2.10.0</text>
+  <text x="763" y="278" class="s">family · s3 · dynamodb (pods in crossplane-system)</text>
+  <text x="763" y="293" class="s">real-AWS HTTPS → dead-end proxy 127.0.0.1:9</text>
+  <path d="M922,308 L922,334" class="ln" stroke="#B45309" marker-end="url(#aa)"/>
+  <text x="930" y="325" class="lbl" fill="#B45309">HTTP :4566 · keys test/test</text>
+  <rect x="751" y="336" width="342" height="70" rx="6" class="aw box"/>
+  <text x="763" y="355" class="h">namespace localstack · LocalStack 4.14.0</text>
+  <text x="763" y="372" class="s">community · S3, S3 Control, DynamoDB, STS, IAM</text>
+  <text x="763" y="387" class="s">in-memory · no account or token needed</text>
+  <text x="749" y="426" class="s">App with bucket/table: true → Bucket · Table · ConfigMap</text>
+
   <!-- ===================== legend ===================== -->
   <g transform="translate(265,700)">
-    <rect x="0" y="0" width="895" height="42" rx="6" fill="#FFFFFF" stroke="#E2E8F0"/>
+    <rect x="0" y="0" width="910" height="42" rx="6" fill="#FFFFFF" stroke="#E2E8F0"/>
     <rect x="14" y="14" width="14" height="14" rx="3" class="xp box"/><text x="34" y="25" class="s">Crossplane / XR</text>
-    <rect x="140" y="14" width="14" height="14" rx="3" class="fn box"/><text x="160" y="25" class="s">composition functions</text>
-    <rect x="300" y="14" width="14" height="14" rx="3" class="pv box"/><text x="320" y="25" class="s">providers / managed resources</text>
-    <rect x="490" y="14" width="14" height="14" rx="3" class="k8 box"/><text x="510" y="25" class="s">native Kubernetes</text>
-    <rect x="630" y="14" width="14" height="14" rx="3" class="pg box"/><text x="650" y="25" class="s">CloudNativePG</text>
-    <path d="M750,21 L790,21" class="obs"/><text x="798" y="25" class="s">observe-only</text>
+    <rect x="124" y="14" width="14" height="14" rx="3" class="fn box"/><text x="144" y="25" class="s">composition functions</text>
+    <rect x="266" y="14" width="14" height="14" rx="3" class="pv box"/><text x="286" y="25" class="s">providers / managed resources</text>
+    <rect x="458" y="14" width="14" height="14" rx="3" class="k8 box"/><text x="478" y="25" class="s">native Kubernetes</text>
+    <rect x="580" y="14" width="14" height="14" rx="3" class="pg box"/><text x="600" y="25" class="s">CloudNativePG</text>
+    <rect x="686" y="14" width="14" height="14" rx="3" class="aw box" stroke-dasharray="3 2"/><text x="706" y="25" class="s">Phase 6 (optional)</text>
+    <path d="M806,21 L828,21" class="obs"/><text x="833" y="25" class="s">observe-only</text>
   </g>
 </svg>

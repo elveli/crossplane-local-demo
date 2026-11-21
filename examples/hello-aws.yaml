@@ -1,0 +1,13 @@
+# Phase 6 (optional, needs `make aws`): an App that also gets an S3 bucket and
+# a DynamoDB table -- both on LocalStack, provisioned by the provider-aws family.
+apiVersion: platform.demo.io/v1alpha1
+kind: App
+metadata:
+  name: shop
+  namespace: team-a
+spec:
+  image: nginxdemos/hello:plain-text
+  replicas: 1
+  port: 80
+  bucket: true
+  table: true

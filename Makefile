@@ -19,7 +19,8 @@ LOCAL_KCFG := .local/kubeconfig
 
 .DEFAULT_GOAL := help
 .PHONY: help up crossplane providers cnpg apis demo demo-auto render test down nuke crossplane-status providers-status status \
-        rbac-audit check-versions logs-crossplane logs-kubernetes logs-helm logs-cnpg
+        rbac-audit check-versions logs-crossplane logs-kubernetes logs-helm logs-cnpg \
+        aws localstack demo-aws demo-aws-auto aws-status localstack-forward logs-aws logs-localstack
 
 help:
 	@echo "Crossplane Local Demo - Available Commands  (CLUSTER=$(CLUSTER), context=$(CTX))"
@@ -28,6 +29,8 @@ help:
 	@printf "  %-24s %s\n" "make crossplane" "Install/upgrade Crossplane via Helm (pinned)"
 	@printf "  %-24s %s\n" "make providers" "Providers, functions, RBAC, ProviderConfigs, CNPG operator"
 	@printf "  %-24s %s\n" "make apis" "XRD (App API) + dev/prod Compositions + RBAC"
+	@printf "  %-24s %s\n" "make aws" "Phase 6 (optional): LocalStack + provider-aws s3/dynamodb"
+	@printf "  %-24s %s\n" "make demo-aws" "Phase 6: narrated S3/DynamoDB-on-LocalStack demo (5 scenes)"
 	@printf "  %-24s %s\n" "make demo" "Narrated, paused demo (7 scenes; Enter to advance)"
 	@printf "  %-24s %s\n" "make demo-auto" "Same demo without pauses (testing/recording)"
 	@printf "  %-24s %s\n" "make render" "Offline: render examples through the Compositions (no cluster)"
@@ -43,6 +46,10 @@ help:
 	@printf "  %-24s %s\n" "make logs-kubernetes" "Tail logs from provider-kubernetes"
 	@printf "  %-24s %s\n" "make logs-helm" "Tail logs from provider-helm"
 	@printf "  %-24s %s\n" "make logs-cnpg" "Tail logs from the CloudNativePG operator"
+	@printf "  %-24s %s\n" "make aws-status" "Phase 6: AWS providers, ProviderConfig, MRs, LocalStack contents"
+	@printf "  %-24s %s\n" "make localstack-forward" "Phase 6: port-forward LocalStack to localhost:4566 (kind)"
+	@printf "  %-24s %s\n" "make logs-aws" "Tail logs from the provider-aws pods"
+	@printf "  %-24s %s\n" "make logs-localstack" "Tail LocalStack's request log"
 
 up:
 	CLUSTER=$(CLUSTER) ./scripts/cluster-up.sh
@@ -86,11 +93,55 @@ apis: check-versions
 	$(K) apply -f crossplane/compositions/
 	$(K) get xrd,compositions
 
+# ---- Phase 6 (optional): AWS flavour on LocalStack ----
+localstack: check-versions
+	CLUSTER=$(CLUSTER) ./scripts/prepull.sh localstack
+	$(K) apply -f cluster/localstack.yaml
+	$(K) -n localstack rollout status deploy/localstack --timeout=180s
+
+aws: localstack
+	CLUSTER=$(CLUSTER) ./scripts/prepull.sh aws
+	$(K) apply -f crossplane/providers/aws/01-runtime-config.yaml
+	@# Family first: the members' dependency must already be satisfied by OUR
+	@# Provider (runtime config + egress guard), see 02-providers.yaml.
+	$(K) apply -f crossplane/providers/aws/02-providers.yaml -l 'platform.demo.io/aws-member notin (true)'
+	$(K) wait --for=condition=Healthy --timeout=8m provider.pkg.crossplane.io/crossplane-contrib-provider-family-aws
+	$(K) apply -f crossplane/providers/aws/02-providers.yaml
+	$(K) wait --for=condition=Healthy --timeout=8m \
+	  provider.pkg.crossplane.io/provider-aws-s3 provider.pkg.crossplane.io/provider-aws-dynamodb
+	@n=$$($(K) get providers.pkg.crossplane.io -o name | grep -c family-aws); \
+	  [ "$$n" = 1 ] || { echo "expected exactly 1 family-aws Provider, found $$n"; exit 1; }
+	$(K) apply -f crossplane/providers/aws/03-providerconfig.yaml
+	$(K) get providers.pkg.crossplane.io,clusterproviderconfigs.aws.m.upbound.io
+
+aws-status:
+	$(K) get providers.pkg.crossplane.io | grep -E 'NAME|aws'
+	$(K) get clusterproviderconfigs.aws.m.upbound.io
+	$(K) get pods -n localstack
+	$(K) get buckets.s3.aws.m.upbound.io,tables.dynamodb.aws.m.upbound.io -A 2>/dev/null || true
+	@echo "--- inside LocalStack (aws CLI from the LocalStack pod; dummy creds):"
+	$(K) -n localstack exec deploy/localstack -- awslocal s3 ls
+	$(K) -n localstack exec deploy/localstack -- awslocal dynamodb list-tables --output text
+
+localstack-forward:
+	$(K) -n localstack port-forward svc/localstack-external 4566:4566
+
+logs-aws:
+	$(K) logs -n $(XP_NS) -l 'pkg.crossplane.io/provider in (crossplane-contrib-provider-family-aws,provider-aws-s3,provider-aws-dynamodb)' -f --max-log-requests 6
+logs-localstack:
+	$(K) logs -n localstack deploy/localstack -f
+
 demo:
 	CLUSTER=$(CLUSTER) ./scripts/demo.sh
 
 demo-auto:
 	CLUSTER=$(CLUSTER) DEMO_AUTO=1 ./scripts/demo.sh
+
+demo-aws:
+	CLUSTER=$(CLUSTER) ./scripts/demo-aws.sh
+
+demo-aws-auto:
+	CLUSTER=$(CLUSTER) DEMO_AUTO=1 ./scripts/demo-aws.sh
 
 # ---- offline (Docker needed for functions, no cluster) ----
 render:
@@ -117,7 +168,7 @@ endif
 
 nuke: down
 	@echo "== removing demo images from the Docker engine (prepull + render)"
-	@docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^(xpkg\.crossplane\.io/crossplane(-contrib)?/|ghcr\.io/cloudnative-pg/|nginxdemos/hello:)' \
+	@docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^(xpkg\.crossplane\.io/crossplane(-contrib)?/|ghcr\.io/cloudnative-pg/|nginxdemos/hello:|localstack/localstack:)' \
 	  | xargs -r docker rmi -f >/dev/null && echo "   done" || true
 	rm -rf .local
 

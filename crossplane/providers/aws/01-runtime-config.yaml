@@ -1,0 +1,45 @@
+# Phase 6 (optional): how the provider-upjet-aws pods run.
+#
+# One shared DRC for the family + its members. No extra RBAC is needed: the
+# AWS providers only touch their own CRDs and the dummy-credentials Secret,
+# both of which the RBAC manager grants automatically.
+#
+# NETWORK GUARD -- the AWS provider pods cannot reach real AWS:
+#   HTTPS_PROXY points at a closed port (127.0.0.1:9) and NO_PROXY exempts only
+#   cluster-internal addresses. Real AWS endpoints are always HTTPS, so any
+#   call that escapes the ProviderConfig's endpoint overrides fails *inside the
+#   pod* with "proxyconnect ... connection refused" instead of leaving the Mac.
+#   LocalStack is plain HTTP on a cluster Service, so it is unaffected; the
+#   Kubernetes API is reached by its Service IP (10.96.0.1), covered by NO_PROXY.
+#   Why this exists: during Phase 6 development a provider-aws-s3 call to the
+#   separate *S3 Control* API (ListTagsForResource) wasn't covered by the
+#   endpoint override and went to AWS (rejected 403: dummy keys). See README.
+# AWS_ENDPOINT_URL: SDK-level catch-all -- any service without an explicit
+#   endpoint in the ProviderConfig resolves to LocalStack too.
+#
+# --poll: upjet providers re-check every MR against the "cloud" on this
+# interval (default 10m). 1m makes drift repair visible in a live demo -- in
+# real AWS keep the default; every poll is an API call you may pay for.
+apiVersion: pkg.crossplane.io/v1beta1
+kind: DeploymentRuntimeConfig
+metadata:
+  name: provider-aws
+spec:
+  deploymentTemplate:
+    spec:
+      selector: {}
+      template:
+        spec:
+          containers:
+            - name: package-runtime
+              args:
+                - --poll=1m
+              env:
+                - { name: HTTPS_PROXY, value: "http://127.0.0.1:9" }
+                - { name: https_proxy, value: "http://127.0.0.1:9" }
+                - { name: NO_PROXY, value: "localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16" }
+                - { name: no_proxy, value: "localhost,127.0.0.1,.svc,.cluster.local,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16" }
+                - { name: AWS_ENDPOINT_URL, value: "http://localstack.localstack.svc.cluster.local:4566" }
+              resources:
+                requests: { cpu: 25m, memory: 128Mi }
+                limits: { cpu: 1000m, memory: 1536Mi }   # startup peak measured ~850Mi

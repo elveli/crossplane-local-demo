@@ -5,6 +5,7 @@ metadata:
   name: hello
   namespace: team-a
 spec:
+  bucket: false
   crossplane:
     resourceRefs:
     - apiVersion: apps/v1
@@ -32,7 +33,10 @@ spec:
   image: nginxdemos/hello:plain-text
   port: 80
   replicas: 2
+  table: false
 status:
+  awsConfig: ""
+  bucket: ""
   conditions:
   - lastTransitionTime: "2024-01-01T00:00:00Z"
     reason: WatchCircuitClosed
@@ -49,6 +53,7 @@ status:
     type: Ready
   connectionSecret: hello-db-conn
   dbReady: true
+  table: ""
   url: http://localhost:80
 ---
 apiVersion: v1

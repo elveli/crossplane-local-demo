@@ -7,7 +7,10 @@
 #                                               provider-helm, observe-only
 #                                               lookups via provider-kubernetes,
 #                                               connection Secret, XR status
-#   3. ready      function-auto-ready           XR Ready only when all composed
+#   3. aws        function-go-templating        optional (Phase 6): S3 bucket +
+#                                               DynamoDB table on LocalStack via
+#                                               provider-aws family, ConfigMap
+#   4. ready      function-auto-ready           XR Ready only when all composed
 #                                               resources are Ready
 #
 # prod vs dev (app-dev.yaml): bigger app requests + liveness probe, an app
@@ -281,6 +284,111 @@ spec:
               connectionSecret: {{ $connSecret | quote }}
 
     # ------------------------------------------------------------------ 3
+    - step: aws
+      functionRef:
+        name: function-go-templating
+      input:
+        apiVersion: gotemplating.fn.crossplane.io/v1beta1
+        kind: GoTemplate
+        source: Inline
+        inline:
+          template: |
+            {{- /* Phase 6 (optional): AWS resources served by LocalStack.
+                   Only emitted when spec.bucket / spec.table are true, so Apps
+                   without them work even if `make aws` was never run. */}}
+            {{- /* ---------- variant profile (the only block that differs from app-dev) */}}
+            {{- $profile := dict "versioning" true "pitr" true }}
+            {{- $xr     := .observed.composite.resource }}
+            {{- $name   := $xr.metadata.name }}
+            {{- $ns     := $xr.metadata.namespace }}
+            {{- $region := "us-west-2" }}
+            {{- $physical := printf "%s-%s" $ns $name }}
+            {{- $bucket := "" }}{{ $table := "" }}
+            {{- if $xr.spec.bucket }}
+            {{- $bucket = $physical }}
+            ---
+            # S3 bucket (cluster MR name <app>-bucket; real bucket name via
+            # external-name so it's unique per namespace and S3-valid).
+            apiVersion: s3.aws.m.upbound.io/v1beta1
+            kind: Bucket
+            metadata:
+              name: {{ $name }}-bucket
+              annotations:
+                crossplane.io/external-name: {{ $bucket }}
+                gotemplating.fn.crossplane.io/composition-resource-name: bucket
+            spec:
+              providerConfigRef: { kind: ClusterProviderConfig, name: localstack }
+              forProvider:
+                region: {{ $region }}
+                forceDestroy: true          # delete even if it still holds objects
+                tags: { Project: crossplane-local-demo, App: {{ $name }} }
+            {{- if $profile.versioning }}
+            ---
+            apiVersion: s3.aws.m.upbound.io/v1beta1
+            kind: BucketVersioning
+            metadata:
+              name: {{ $name }}-bucket-versioning
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: bucket-versioning
+            spec:
+              providerConfigRef: { kind: ClusterProviderConfig, name: localstack }
+              forProvider:
+                region: {{ $region }}
+                bucketRef: { name: {{ $name }}-bucket }
+                versioningConfiguration: { status: Enabled }
+            {{- end }}
+            {{- end }}
+            {{- if $xr.spec.table }}
+            {{- $table = $physical }}
+            ---
+            apiVersion: dynamodb.aws.m.upbound.io/v1beta1
+            kind: Table
+            metadata:
+              name: {{ $name }}-table
+              annotations:
+                crossplane.io/external-name: {{ $table }}
+                gotemplating.fn.crossplane.io/composition-resource-name: table
+            spec:
+              providerConfigRef: { kind: ClusterProviderConfig, name: localstack }
+              forProvider:
+                region: {{ $region }}
+                billingMode: PAY_PER_REQUEST
+                hashKey: id
+                attribute:
+                  - { name: id, type: S }
+                {{- if $profile.pitr }}
+                pointInTimeRecovery: { enabled: true }
+                {{- end }}
+                tags: { Project: crossplane-local-demo, App: {{ $name }} }
+            {{- end }}
+            {{- if or $bucket $table }}
+            ---
+            # Settings for the app to consume (envFrom). The endpoint is the
+            # in-cluster LocalStack Service -- never a real AWS endpoint.
+            apiVersion: v1
+            kind: ConfigMap
+            metadata:
+              name: {{ $name }}-aws
+              annotations:
+                gotemplating.fn.crossplane.io/composition-resource-name: aws-config
+              labels:
+                platform.demo.io/app: {{ $name }}
+            data:
+              AWS_ENDPOINT_URL: http://localstack.localstack.svc.cluster.local:4566
+              AWS_REGION: {{ $region }}            # AWS SDKs
+              AWS_DEFAULT_REGION: {{ $region }}    # AWS CLI
+              S3_BUCKET: {{ $bucket | quote }}
+              DYNAMODB_TABLE: {{ $table | quote }}
+            {{- end }}
+            ---
+            apiVersion: platform.demo.io/v1alpha1
+            kind: App
+            status:
+              bucket: {{ $bucket | quote }}
+              table: {{ $table | quote }}
+              awsConfig: {{ if or $bucket $table }}{{ printf "%s-aws" $name | quote }}{{ else }}""{{ end }}
+
+    # ------------------------------------------------------------------ 4
     - step: ready
       functionRef:
         name: function-auto-ready

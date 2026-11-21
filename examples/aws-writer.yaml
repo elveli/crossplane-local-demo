@@ -1,0 +1,27 @@
+# Phase 6: a one-shot workload that consumes the App's composed ConfigMap
+# (shop-aws: AWS_ENDPOINT_URL, region, S3_BUCKET, DYNAMODB_TABLE) and writes an
+# object + an item. The image is the already-pulled LocalStack image, used only
+# for its bundled aws CLI. Keys are LocalStack's dummy test/test.
+apiVersion: v1
+kind: Pod
+metadata:
+  name: writer
+  namespace: team-a
+spec:
+  restartPolicy: Never
+  containers:
+    - name: writer
+      image: localstack/localstack:4.14.0
+      envFrom:
+        - configMapRef: { name: shop-aws }
+      env:
+        - { name: AWS_ACCESS_KEY_ID, value: test }
+        - { name: AWS_SECRET_ACCESS_KEY, value: test }
+      command:
+        - sh
+        - -c
+        - |
+          echo hi > /tmp/hi.txt
+          aws s3 cp /tmp/hi.txt "s3://$S3_BUCKET/hi.txt" --only-show-errors
+          aws dynamodb put-item --table-name "$DYNAMODB_TABLE" --item '{"id":{"S":"order-1"}}'
+          echo "wrote s3://$S3_BUCKET/hi.txt and $DYNAMODB_TABLE/order-1 via $AWS_ENDPOINT_URL"

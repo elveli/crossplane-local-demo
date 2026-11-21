@@ -80,6 +80,18 @@ spec:
                       enum: [small, medium]
                       default: small
                       description: small = laptop-sized; medium = more CPU/RAM/storage.
+                bucket:
+                  type: boolean
+                  default: false
+                  description: >-
+                    Optional (needs `make aws`): an S3 bucket named <namespace>-<name>,
+                    served by LocalStack via provider-aws-s3.
+                table:
+                  type: boolean
+                  default: false
+                  description: >-
+                    Optional (needs `make aws`): a DynamoDB table named <namespace>-<name>
+                    (hash key `id`, on-demand), served by LocalStack via provider-aws-dynamodb.
             status:
               type: object
               description: Written back by the Composition.
@@ -94,3 +106,12 @@ spec:
                 connectionSecret:
                   type: string
                   description: Name of the Secret (same namespace) with DB connection details.
+                bucket:
+                  type: string
+                  description: S3 bucket name (empty unless spec.bucket).
+                table:
+                  type: string
+                  description: DynamoDB table name (empty unless spec.table).
+                awsConfig:
+                  type: string
+                  description: Name of the ConfigMap (same namespace) with AWS endpoint/bucket/table settings.
