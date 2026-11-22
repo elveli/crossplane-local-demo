@@ -32,10 +32,11 @@ jobs:
         run: |
           source versions.env
           url="https://cli.crossplane.io/stable/${CROSSPLANE_CLI_VERSION}/bin/linux_amd64/crossplane"
-          curl -sSfL --retry 3 -o crossplane "$url"
-          echo "${CROSSPLANE_CLI_SHA256}  crossplane" | sha256sum -c -
-          sudo install -m 0755 crossplane /usr/local/bin/crossplane
-          rm crossplane
+          # Download outside the checkout: the repo has a crossplane/ directory.
+          bin="$RUNNER_TEMP/crossplane"
+          curl -sSfL --retry 3 -o "$bin" "$url"
+          echo "${CROSSPLANE_CLI_SHA256}  $bin" | sha256sum -c -
+          sudo install -m 0755 "$bin" /usr/local/bin/crossplane
           crossplane version --client
 
       # `crossplane resource validate` caches the CRDs it extracts from the
