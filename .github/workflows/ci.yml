@@ -1,0 +1,55 @@
+# Offline checks only -- the same `make test` you run locally:
+#   version pins, shellcheck, golden-file renders (functions run as Docker
+#   containers), and schema validation against the pinned provider CRDs.
+# No cluster, no secrets, no cloud credentials: nothing here talks to AWS.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      # sha256 of cli.crossplane.io/stable/<CROSSPLANE_CLI_VERSION>/bin/linux_amd64/crossplane.
+      # Bump together with CROSSPLANE_CLI_VERSION in versions.env.
+      CROSSPLANE_CLI_SHA256: 065dd6b40c9ea5fc71e49900d5c924cc0bec7f58375922ddbde6b402f292347e
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Crossplane CLI (pinned, checksum-verified)
+        run: |
+          source versions.env
+          url="https://cli.crossplane.io/stable/${CROSSPLANE_CLI_VERSION}/bin/linux_amd64/crossplane"
+          curl -sSfL --retry 3 -o crossplane "$url"
+          echo "${CROSSPLANE_CLI_SHA256}  crossplane" | sha256sum -c -
+          sudo install -m 0755 crossplane /usr/local/bin/crossplane
+          rm crossplane
+          crossplane version --client
+
+      # `crossplane resource validate` caches the CRDs it extracts from the
+      # provider packages and the Crossplane image here.
+      - name: Cache provider schemas
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.crossplane/cache
+          key: xp-schemas-${{ hashFiles('versions.env', 'crossplane/providers/**/*.yaml') }}
+
+      - name: Tool versions
+        run: |
+          docker version --format 'docker {{.Server.Version}}'
+          shellcheck --version | sed -n 2p
+
+      - name: make test
+        run: make test

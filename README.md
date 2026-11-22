@@ -1,5 +1,7 @@
 # Crossplane Local Demo
 
+[![ci](https://github.com/elveli/crossplane-local-demo/actions/workflows/ci.yml/badge.svg)](https://github.com/elveli/crossplane-local-demo/actions/workflows/ci.yml)
+
 A self-contained **Crossplane v2** platform-engineering demo that runs entirely on
 **Docker Desktop** (built for Intel Macs). It needs no cloud account and no credentials.
 A developer creates one small `App` object, and the platform turns it into a
@@ -117,6 +119,7 @@ sequenceDiagram
 
 ```text
 .
+├── .github/workflows/ci.yml       # CI: runs `make test` on every push/PR (offline, no secrets)
 ├── Makefile                       # all entry points (make help)
 ├── versions.env                   # every pinned version, single source of truth
 ├── cluster/
@@ -559,6 +562,19 @@ ok       rejects invalid-size.yaml: spec.database.size: Unsupported value: "huge
   offline). The
   `invalid-*.yaml` cases must fail.
 
+### CI
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs the same `make test` on
+every push to `main` and on every pull request, on an `ubuntu-24.04` runner (Docker
+and shellcheck are preinstalled there). It:
+
+- installs the Crossplane CLI at `CROSSPLANE_CLI_VERSION` from `versions.env` and
+  checks its sha256 against the value pinned in the workflow (bump both together);
+- caches `~/.crossplane/cache` (the provider CRDs that `crossplane resource validate`
+  extracts), keyed on `versions.env` and the provider manifests;
+- uses no secrets and no cluster, and makes no cloud calls. Actions are pinned to
+  commit SHAs, and the token is read-only (`contents: read`).
+
 ## Crossplane v1 → v2: What Changed
 
 Each of these was confirmed against the current docs and CLI while building this
@@ -731,6 +747,7 @@ releases and the Helm repos). `make check-versions` fails if a manifest disagree
 | Component | Version |
 |---|---|
 | Crossplane (Helm chart) | 2.4.3 |
+| Crossplane CLI (`make test`, CI) | v2.5.0 |
 | provider-kubernetes / provider-helm | v1.4.1 / v1.5.0 |
 | function-patch-and-transform / go-templating / auto-ready | v0.11.2 / v0.13.2 / v0.7.3 |
 | CloudNativePG operator chart / app · cluster chart | 0.29.2 / 1.30.2 · 0.9.0 |
