@@ -47,6 +47,24 @@ jobs:
           path: ~/.crossplane/cache
           key: xp-schemas-${{ hashFiles('versions.env', 'crossplane/providers/**/*.yaml') }}
 
+      # `crossplane composition render` runs each function as a Docker container
+      # and gives up after ~60s if the pull is slow (seen once from
+      # xpkg.crossplane.io). Pull them first, with retries; render then uses
+      # the local images (its default pull policy is IfNotPresent).
+      - name: Pre-pull function images (with retries)
+        run: |
+          mapfile -t imgs < <(sed -n 's/^ *package: *//p' crossplane/functions/functions.yaml)
+          [ "${#imgs[@]}" -gt 0 ] || { echo "no function packages found"; exit 1; }
+          for img in "${imgs[@]}"; do
+            for attempt in 1 2 3 4 5; do
+              if timeout 180 docker pull -q "$img"; then break; fi
+              [ "$attempt" = 5 ] && { echo "::error::failed to pull $img after 5 attempts"; exit 1; }
+              delay=$((attempt * 15))
+              echo "::warning::pull of $img failed (attempt $attempt/5), retrying in ${delay}s"
+              sleep "$delay"
+            done
+          done
+
       - name: Tool versions
         run: |
           docker version --format 'docker {{.Server.Version}}'
