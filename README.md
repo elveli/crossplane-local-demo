@@ -28,6 +28,7 @@ which used raw managed resources against real AWS (see
 - [Prerequisites](#prerequisites)
 - [Quick Start (5 minutes)](#quick-start-5-minutes)
 - [Makefile Command Reference](#makefile-command-reference)
+- [Crossplane CLI by Example](#crossplane-cli-by-example)
 - [The Demo, Scene by Scene](#the-demo-scene-by-scene)
 - [How It Works](#how-it-works)
 - [Optional: AWS Flavour on LocalStack (Phase 6)](#optional-aws-flavour-on-localstack-phase-6)
@@ -196,7 +197,8 @@ developer applies an App:
     ├── architecture.svg           # components (top of this README)
     ├── glossary.svg               # how XRD, XR, Composition, MRs, providers fit together
     ├── apply-sequence.svg         # what happens when an App is applied
-    └── gen-apply-sequence.py      # regenerates apply-sequence.svg (python3, stdlib only)
+    ├── gen-apply-sequence.py      # regenerates apply-sequence.svg (python3, stdlib only)
+    └── demo-transcript.md         # unedited output of make up, demo, status, logs, render, test
 ```
 
 ## Prerequisites
@@ -249,6 +251,9 @@ Measured on the reference Intel Mac with images already cached: `make up` 1m43s,
 App Ready in about 65 s, `make demo-auto` 2m45s. The first run downloads about 1 GB
 of images and takes longer.
 
+To see what all of this prints before you run it, read the
+[live transcript](docs/demo-transcript.md).
+
 **kind fallback:** `CLUSTER=kind make up` creates a single-node kind cluster named
 `crossplane-demo`, and every target accepts `CLUSTER=kind`. kind has no LoadBalancer
 implementation, and an exposed App's Service would stay `<pending>` (so the App never
@@ -285,10 +290,117 @@ nodes pull directly rather than through Docker Desktop's mirror. Verified: `make
 Target names follow the Crossplane-AWS-Demo conventions (`*-status`, `logs-*`,
 `crossplane-install` became `crossplane`, `teardown` became `down`).
 
+## Crossplane CLI by Example
+
+The `crossplane` CLI (v2.5.0, `brew install crossplane`) has two kinds of commands:
+ones that talk to a cluster and ones that run fully offline. For the cluster ones,
+**always pass `--context docker-desktop`** (or `-c docker-desktop`). Without it the
+CLI uses your kubeconfig's current context, and fails with
+`failed to get kubeconfig: invalid configuration: no configuration has been provided`
+if none is set.
+
+### Against the cluster: `resource trace`
+
+Run `make up` and apply `examples/hello.yaml` first (see [Quick Start](#quick-start-5-minutes)).
+
+```bash
+# The App and everything composed from it, as a tree with Synced/Ready per node
+crossplane resource trace app/hello -n team-a --context docker-desktop
+
+# Full condition messages (not cut at 64 chars) plus kind-specific columns:
+# the first thing to run when something is stuck SYNCED=False or READY=False
+crossplane resource trace app/hello -n team-a --context docker-desktop -o wide
+
+# Also list connection Secrets (names only, never values): shows hello-db-conn
+crossplane resource trace app/hello -n team-a --context docker-desktop --show-connection-secrets
+
+# Keep watching: nice next to scene 3 (drift) or scene 4 (database.enabled: false)
+crossplane resource trace app/hello -n team-a --context docker-desktop --watch
+
+# Every App in the namespace at once
+crossplane resource trace app -n team-a --context docker-desktop
+
+# Machine-readable: every object trace fetched, in full (also -o yaml)
+crossplane resource trace app/hello -n team-a --context docker-desktop -o json | jq
+
+# Picture of the tree (needs Graphviz: brew install graphviz)
+crossplane resource trace app/hello -n team-a --context docker-desktop -o dot | dot -Tpng -o hello.png
+
+# Packages trace too: a provider or function and its active revision
+crossplane resource trace providers.pkg.crossplane.io/provider-helm --context docker-desktop
+crossplane resource trace functions.pkg.crossplane.io/function-auto-ready --context docker-desktop
+```
+
+Trace also accepts a single managed resource, e.g.
+`crossplane resource trace releases.helm.m.crossplane.io/hello-db -n team-a --context docker-desktop`.
+For real App trees (with and without the database), see scenes 1 and 4 of the
+[live transcript](docs/demo-transcript.md). For packages, the output looks like this:
+
+```text
+NAME                                             VERSION   INSTALLED   HEALTHY   STATE    STATUS
+Provider/provider-helm                           v1.5.0    True        True      -        HealthyPackageRevision
+└─ ProviderRevision/provider-helm-a3eada4a7cf4   v1.5.0    -           -         Active
+```
+
+### Against the cluster: commands without `--context`
+
+`crossplane version` and `crossplane cluster top` have no `--context` flag. Point them
+at the generated single-context kubeconfig instead (gitignored, created by `make`):
+
+```bash
+make -s .local/kubeconfig
+KUBECONFIG=.local/kubeconfig crossplane version          # client v2.5.0, server v2.4.3
+KUBECONFIG=.local/kubeconfig crossplane cluster top -s   # CPU/memory per Crossplane, provider and function pod
+```
+
+`cluster top` needs metrics-server (Docker Desktop has it). `-s` adds a summary,
+for example `Nr of Crossplane pods: 7 ... Memory: 505Mi`.
+
+### Offline: render, validate, convert
+
+These need Docker (render runs the functions as containers) but no cluster.
+
+```bash
+R="crossplane composition render examples/hello.yaml crossplane/compositions/app-dev.yaml \
+   crossplane/functions/functions.yaml --xrd crossplane/apis/app-xrd.yaml"
+
+# What would the Composition create for this App?
+$R
+
+# The same, with the functions' results ("Composed resource ... is not yet ready")
+$R --include-function-results
+
+# Pretend Postgres is already Ready: the connection Secret appears in the output
+$R --observed-resources tests/fixtures/observed-db-ready.yaml | grep -E '^kind:|^  name:'
+
+# Include the pipeline context the functions passed between steps (kind: Context)
+$R --include-context
+
+# Render against the prod Composition instead
+crossplane composition render examples/hello-prod.yaml crossplane/compositions/app-prod.yaml \
+  crossplane/functions/functions.yaml --xrd crossplane/apis/app-xrd.yaml
+
+# Schema-check an App against the XRD before applying it
+crossplane resource validate crossplane/apis/app-xrd.yaml examples/hello.yaml
+crossplane resource validate crossplane/apis/app-xrd.yaml tests/cases/invalid-size.yaml
+#  [x] ... spec.database.size: Unsupported value: "huge": supported values: "small", "medium"
+
+# The CRD Crossplane generates from the XRD (what `kubectl explain app` is based on)
+crossplane xrd convert crossplane/apis/app-xrd.yaml
+```
+
+`tests/validate.sh` runs the full validation, including composed resources against the
+provider CRDs. `make test` runs it together with the golden renders.
+
 ## The Demo, Scene by Scene
 
 `make demo` (pauses for Enter) or `make demo-auto`. Times were measured on the
 reference Intel Mac.
+
+**Full live output:** [docs/demo-transcript.md](docs/demo-transcript.md) has an
+unedited run of `make up`, all 7 scenes of `make demo`, the status targets,
+`make logs-crossplane`, re-runs of `make providers` / `make apis`, the full
+`make render` output, and `make test`.
 
 | # | Scene | What you see | Time |
 |---|---|---|---|
