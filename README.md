@@ -222,7 +222,7 @@ memory is tight, create Apps with `database.enabled: false`.
 ```bash
 brew install kubectl helm crossplane    # crossplane CLI >= 2.5 (new command names)
 brew install kind shellcheck            # optional: kind fallback, script linting
-brew install awscli awscli-local        # optional, Phase 6: aws CLI + awslocal wrapper
+brew install awscli                     # optional, Phase 6: aws CLI (pointed at LocalStack)
 ```
 
 ## Quick Start (5 minutes)
@@ -477,7 +477,7 @@ render none of this, so they work even if `make aws` never ran.
 |---|---|---|---|
 | 1 | Guardrails | the family providers; the ClusterProviderConfig (static endpoint, service list, `skip_*`, dummy keys); the provider pods' `HTTPS_PROXY` backstop | — |
 | 2 | Request | `hello-aws.yaml` (`shop`) becomes Ready; `trace` shows Deployment, Service, Bucket, Table, ConfigMap | ~30–60 s |
-| 3 | Check from the Mac | `awslocal s3 ls`, `dynamodb list-tables`, and the bucket's `crossplane-*` tags on the "cloud" side | — |
+| 3 | Check from the Mac | `aws s3 ls`, `dynamodb list-tables` (endpoint: LocalStack), and the bucket's `crossplane-*` tags on the "cloud" side | — |
 | 4 | A workload uses it | a pod whose only AWS settings come from `envFrom: shop-aws` writes `hi.txt` and item `order-1`; both are visible from the Mac | ~6 s |
 | 5 | Drift and turning off | `s3 rb --force` behind Crossplane's back → bucket re-created; `table: false` → table deleted; delete the App → LocalStack is empty | ~42 s / 1 s / ~31 s |
 
@@ -493,26 +493,25 @@ is `localhost:4566`; on kind, run `make localstack-forward`:
 ```bash
 export AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-west-2 \
        AWS_CONFIG_FILE=/dev/null AWS_SHARED_CREDENTIALS_FILE=/dev/null  # never your ~/.aws
-awslocal s3 ls                      # or: aws --endpoint-url http://localhost:4566 s3 ls
-awslocal dynamodb list-tables
+aws --endpoint-url http://localhost:4566 s3 ls
+aws --endpoint-url http://localhost:4566 dynamodb list-tables
 ```
 
-**What is `awslocal`?** A thin wrapper around the normal AWS CLI (`aws`), published
-by LocalStack (Homebrew `awscli-local`, also on PyPI). It runs the same `aws`
-command but adds `--endpoint-url` pointing at LocalStack (`http://localhost:4566`
-by default), so `awslocal s3 ls` is shorthand for
-`aws --endpoint-url http://localhost:4566 s3 ls`. Nothing else changes: the
-commands, flags and output are the real AWS CLI's.
+**Always pass `--endpoint-url`.** It's what sends the normal AWS CLI to LocalStack
+instead of AWS. The CLI still reads your `~/.aws` profile and environment for
+credentials, so the block above sets dummy keys (LocalStack accepts any) and points
+`AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` at `/dev/null`, so a real
+profile is never picked up, even by accident. `make demo-aws` does the same.
 
-- **It's optional.** It needs the `aws` CLI underneath. `make demo-aws` uses
-  `awslocal` if it's installed; otherwise it falls back to
-  `aws --endpoint-url http://localhost:4566` and says so.
-- **It only redirects the endpoint.** The AWS CLI still reads your `~/.aws` profile
-  and environment for credentials. That's why the block above sets the dummy keys
-  and points `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` at `/dev/null`, so
-  a real profile is never picked up, even by accident. LocalStack accepts any keys.
-- **It's not part of Crossplane.** It's only for you, on the Mac. Crossplane talks to LocalStack through the ProviderConfig endpoint, not through
-  this CLI.
+**What about `awslocal`?** LocalStack's `awslocal` (Homebrew `awscli-local`) is a
+thin wrapper that runs `aws` pointed at LocalStack, so `awslocal s3 ls` does what
+`aws --endpoint-url http://localhost:4566 s3 ls` does. It's now
+**deprecated**: it no longer receives updates and prints a 17-line warning
+(pointing to LocalStack's new `lstk` CLI) on every call. This repo doesn't need it
+and uses the plain `aws` CLI everywhere. If you have it installed, it still works
+as a shorthand. `lstk` isn't used here: it wasn't checked whether it works
+without a LocalStack account, which newer LocalStack releases require (see
+[Why LocalStack 4.14.0](#why-localstack-4140)).
 
 ### Guardrails: nothing reaches real AWS
 
@@ -838,5 +837,5 @@ make status | make rbac-audit | make logs-helm | make logs-kubernetes
 # Phase 6 (optional)
 make aws | make demo-aws | make aws-status | make logs-localstack
 AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_CONFIG_FILE=/dev/null \
-  awslocal s3 ls            # or: aws --endpoint-url http://localhost:4566 s3 ls
+  aws --endpoint-url http://localhost:4566 s3 ls
 ```

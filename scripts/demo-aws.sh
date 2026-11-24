@@ -56,9 +56,10 @@ trap cleanup EXIT
 # ---------------------------------------------------------------- preflight
 k get clusterproviderconfigs.aws.m.upbound.io localstack >/dev/null 2>&1 \
   || { echo "Phase 6 not installed -- run: make aws" >&2; exit 1; }
-if command -v awslocal >/dev/null; then AWS_CMD=(awslocal); AWS_SHOWN=awslocal
-else AWS_CMD=(aws --endpoint-url http://localhost:4566); AWS_SHOWN="aws --endpoint-url http://localhost:4566"
-     note "awslocal not found -> using the plain aws CLI with --endpoint-url (same thing)"; fi
+# Plain aws CLI + explicit endpoint. (Not `awslocal`: it only adds this same
+# --endpoint-url, is deprecated, and prints a 17-line warning on every call.)
+command -v aws >/dev/null || { echo "aws CLI not found -- brew install awscli" >&2; exit 1; }
+AWS_CMD=(aws --endpoint-url http://localhost:4566); AWS_SHOWN="aws --endpoint-url http://localhost:4566"
 # Docker Desktop forwards the localstack-external LoadBalancer to localhost:4566;
 # kind has no LoadBalancer -> port-forward.
 if ! curl -sf -m 3 http://localhost:4566/_localstack/health >/dev/null; then

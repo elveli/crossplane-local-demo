@@ -3,7 +3,7 @@
 # In-cluster (rather than a separate `docker run`) so the providers reach it by
 # Service DNS on both Docker Desktop and kind, and `make down` removes it with
 # everything else. Docker Desktop forwards the LoadBalancer port to the Mac,
-# so `awslocal` (which defaults to http://localhost:4566) just works; on kind
+# so `aws --endpoint-url http://localhost:4566` just works from the Mac; on kind
 # use `make localstack-forward`.
 #
 # Two Services:

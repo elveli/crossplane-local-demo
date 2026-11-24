@@ -10,6 +10,8 @@ else
   CTX := docker-desktop
 endif
 K := kubectl --context $(CTX)
+# aws CLI inside the LocalStack pod: dummy keys, LocalStack endpoint (Phase 6).
+LS_AWS := env AWS_ACCESS_KEY_ID=test AWS_SECRET_ACCESS_KEY=test AWS_DEFAULT_REGION=us-west-2 aws --endpoint-url http://localhost:4566
 H := helm --kube-context $(CTX)
 XP_NS := crossplane-system
 CNPG_NS := cnpg-system
@@ -120,8 +122,8 @@ aws-status:
 	$(K) get pods -n localstack
 	$(K) get buckets.s3.aws.m.upbound.io,tables.dynamodb.aws.m.upbound.io -A 2>/dev/null || true
 	@echo "--- inside LocalStack (aws CLI from the LocalStack pod; dummy creds):"
-	$(K) -n localstack exec deploy/localstack -- awslocal s3 ls
-	$(K) -n localstack exec deploy/localstack -- awslocal dynamodb list-tables --output text
+	$(K) -n localstack exec deploy/localstack -- $(LS_AWS) s3 ls
+	$(K) -n localstack exec deploy/localstack -- $(LS_AWS) dynamodb list-tables --output text
 
 localstack-forward:
 	$(K) -n localstack port-forward svc/localstack-external 4566:4566

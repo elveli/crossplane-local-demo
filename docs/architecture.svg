@@ -49,8 +49,8 @@
   <text x="42" y="338" class="m">$ make aws</text>
   <text x="42" y="356" class="s">optional: LocalStack + AWS family</text>
   <rect x="32" y="388" width="181" height="54" rx="6" fill="#FFFBEB" stroke="#B45309" stroke-dasharray="5 3"/>
-  <text x="42" y="408" class="m">$ awslocal s3 ls</text>
-  <text x="42" y="426" class="s">→ localhost:4566 (LoadBalancer)</text>
+  <text x="42" y="408" class="m">$ aws s3 ls</text>
+  <text x="42" y="426" class="s">--endpoint-url localhost:4566</text>
 
   <rect x="32" y="516" width="181" height="48" rx="6" fill="#FFFFFF" stroke="#CBD5E1"/>
   <text x="42" y="536" class="m">$ kubectl apply -f</text>
