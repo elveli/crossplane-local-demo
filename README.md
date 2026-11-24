@@ -68,6 +68,13 @@ spec:
   Deployment does. Teams see and manage only their own Apps, and everything an App
   creates lands in that namespace too. Crossplane v1 needed an extra "claim" object
   for this; v2 doesn't (see [Glossary](#crossplane-terms-glossary)).
+- **`image: nginxdemos/hello:plain-text`:** a tiny demo web server published by
+  NGINX on Docker Hub. Each response says which pod answered (server name = pod
+  name, server address = pod IP), so `curl localhost` a few times shows traffic
+  alternating between the two replicas. The `plain-text` tag returns plain text
+  instead of HTML, which reads better in a terminal. It needs no configuration
+  and listens on port 80. It has nothing to do with Crossplane; any image works,
+  just change `image` and `port`.
 
 From that one object, Crossplane builds and maintains:
 
@@ -188,7 +195,8 @@ developer applies an App:
 └── docs/
     ├── architecture.svg           # components (top of this README)
     ├── glossary.svg               # how XRD, XR, Composition, MRs, providers fit together
-    └── apply-sequence.svg         # what happens when an App is applied
+    ├── apply-sequence.svg         # what happens when an App is applied
+    └── gen-apply-sequence.py      # regenerates apply-sequence.svg (python3, stdlib only)
 ```
 
 ## Prerequisites
