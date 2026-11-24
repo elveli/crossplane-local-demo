@@ -497,6 +497,23 @@ awslocal s3 ls                      # or: aws --endpoint-url http://localhost:45
 awslocal dynamodb list-tables
 ```
 
+**What is `awslocal`?** A thin wrapper around the normal AWS CLI (`aws`), published
+by LocalStack (Homebrew `awscli-local`, also on PyPI). It runs the same `aws`
+command but adds `--endpoint-url` pointing at LocalStack (`http://localhost:4566`
+by default), so `awslocal s3 ls` is shorthand for
+`aws --endpoint-url http://localhost:4566 s3 ls`. Nothing else changes: the
+commands, flags and output are the real AWS CLI's.
+
+- **It's optional.** It needs the `aws` CLI underneath. `make demo-aws` uses
+  `awslocal` if it's installed; otherwise it falls back to
+  `aws --endpoint-url http://localhost:4566` and says so.
+- **It only redirects the endpoint.** The AWS CLI still reads your `~/.aws` profile
+  and environment for credentials. That's why the block above sets the dummy keys
+  and points `AWS_CONFIG_FILE` and `AWS_SHARED_CREDENTIALS_FILE` at `/dev/null`, so
+  a real profile is never picked up, even by accident. LocalStack accepts any keys.
+- **It's not part of Crossplane.** It's only for you, on the Mac. Crossplane talks to LocalStack through the ProviderConfig endpoint, not through
+  this CLI.
+
 ### Guardrails: nothing reaches real AWS
 
 Four independent layers. The last one exists because the first one alone wasn't
