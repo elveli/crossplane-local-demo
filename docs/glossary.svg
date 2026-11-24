@@ -1,0 +1,161 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 620" width="1100" height="620" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" font-size="12">
+  <title>How the Crossplane terms fit together: XRD, XR, Composition, functions, composed resources, MRs, providers</title>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#334155"/></marker>
+    <marker id="ab" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#1D4ED8"/></marker>
+    <marker id="ap" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#6D28D9"/></marker>
+    <style>
+      .t  { fill:#0F172A; }
+      .s  { fill:#475569; font-size:11px; }
+      .h  { font-weight:600; font-size:13px; fill:#0F172A; }
+      .ab { font-weight:700; font-size:15px; fill:#0F172A; }
+      .m  { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:11px; fill:#0F172A; }
+      .lbl{ font-size:10.5px; fill:#334155; }
+      .xp { fill:#EDE9FE; stroke:#6D28D9; }
+      .fn { fill:#CCFBF1; stroke:#0F766E; }
+      .pv { fill:#DBEAFE; stroke:#1D4ED8; }
+      .k8 { fill:#DCFCE7; stroke:#15803D; }
+      .pg { fill:#FFEDD5; stroke:#C2410C; }
+      .aw { fill:#FEF3C7; stroke:#B45309; stroke-dasharray:5 3; }
+      .awt{ fill:#92400E; }
+      .box{ stroke-width:1.4; }
+      .ln { stroke:#334155; stroke-width:1.4; fill:none; }
+      .st { stroke:#6D28D9; stroke-width:1.4; fill:none; stroke-dasharray:5 4; }
+    </style>
+  </defs>
+
+  <rect width="1100" height="620" fill="#FFFFFF"/>
+  <text x="20" y="32" font-size="18" font-weight="700" class="t">Crossplane terms — how they fit together</text>
+  <text x="430" y="32" class="s">using this repo's App as the example</text>
+
+  <!-- ============ row 1: XRD -> XR -> Composition ============ -->
+  <!-- XRD -->
+  <rect x="20" y="62" width="240" height="140" rx="8" class="xp box"/>
+  <text x="34" y="86" class="ab">XRD</text>
+  <text x="74" y="86" class="s">Composite Resource Definition</text>
+  <text x="34" y="110" class="t">Defines a new API: its name,</text>
+  <text x="34" y="126" class="t">fields, defaults and limits.</text>
+  <text x="34" y="150" class="s">Crossplane turns it into a CRD.</text>
+  <text x="34" y="182" class="m">crossplane/apis/app-xrd.yaml</text>
+
+  <line x1="260" y1="132" x2="316" y2="132" class="ln" marker-end="url(#a)"/>
+  <text x="268" y="124" class="lbl">defines</text>
+
+  <!-- XR -->
+  <rect x="320" y="62" width="240" height="140" rx="8" class="xp box"/>
+  <text x="334" y="86" class="ab">XR</text>
+  <text x="362" y="86" class="s">Composite Resource</text>
+  <text x="334" y="110" class="t">One object of that API, written</text>
+  <text x="334" y="126" class="t">by a developer in their namespace.</text>
+  <text x="334" y="150" class="s">Gets status + Ready back.</text>
+  <text x="334" y="182" class="m">App/hello  (namespace team-a)</text>
+
+  <line x1="560" y1="132" x2="616" y2="132" class="ln" marker-end="url(#a)"/>
+  <text x="566" y="124" class="lbl">selects</text>
+
+  <!-- Composition with pipeline of functions -->
+  <rect x="620" y="52" width="460" height="170" rx="8" class="xp box"/>
+  <text x="634" y="76" class="ab">Composition</text>
+  <text x="740" y="76" class="m">app-dev | app-prod</text>
+  <text x="634" y="96" class="s">The recipe: a pipeline of composition functions, run in order.</text>
+
+  <rect x="634"  y="112" width="98" height="58" rx="6" class="fn box"/>
+  <text x="644"  y="134" class="m">app-core</text>
+  <text x="644"  y="152" class="s">patch-and-</text>
+  <text x="644"  y="164" class="s">transform</text>
+  <line x1="732" y1="141" x2="744" y2="141" class="ln" marker-end="url(#a)"/>
+  <rect x="746"  y="112" width="98" height="58" rx="6" class="fn box"/>
+  <text x="756"  y="134" class="m">database</text>
+  <text x="756"  y="152" class="s">go-templating</text>
+  <line x1="844" y1="141" x2="856" y2="141" class="ln" marker-end="url(#a)"/>
+  <rect x="858"  y="112" width="98" height="58" rx="6" class="fn box"/>
+  <text x="868"  y="134" class="m">aws</text>
+  <text x="868"  y="152" class="s">go-templating</text>
+  <line x1="956" y1="141" x2="968" y2="141" class="ln" marker-end="url(#a)"/>
+  <rect x="970"  y="112" width="98" height="58" rx="6" class="fn box"/>
+  <text x="980"  y="134" class="m">ready</text>
+  <text x="980"  y="152" class="s">auto-ready</text>
+  <text x="634" y="196" class="s">Each function step gets the XR + observed state and returns</text>
+  <text x="634" y="210" class="s">the desired resources.</text>
+
+  <!-- Composition -> composed resources -->
+  <line x1="900" y1="222" x2="900" y2="296" class="ln" marker-end="url(#a)"/>
+  <text x="908" y="264" class="lbl">renders the desired resources</text>
+
+  <!-- ============ row 2: external <- providers <- composed resources ============ -->
+  <rect x="620" y="300" width="460" height="214" rx="8" fill="#F8FAFC" stroke="#64748B" stroke-width="1.4"/>
+  <text x="634" y="324" class="h">Composed resources</text>
+  <text x="782" y="324" class="s">everything created for one XR, in its namespace</text>
+
+  <!-- MRs -->
+  <rect x="634" y="338" width="214" height="162" rx="6" class="pv box"/>
+  <text x="646" y="360" class="ab">MRs</text>
+  <text x="686" y="360" class="s">Managed Resources</text>
+  <text x="646" y="378" class="s">each stands for one external thing</text>
+  <text x="646" y="402" class="m">Release</text>
+  <text x="646" y="416" class="s">helm.m.crossplane.io</text>
+  <text x="646" y="438" class="m">Object  (observe-only)</text>
+  <text x="646" y="452" class="s">kubernetes.m.crossplane.io</text>
+  <text x="646" y="474" class="m awt">Bucket · Table</text>
+  <text x="646" y="488" class="s awt">*.aws.m.upbound.io (Phase 6)</text>
+
+  <!-- plain Kubernetes -->
+  <rect x="862" y="338" width="204" height="162" rx="6" class="k8 box"/>
+  <text x="874" y="360" class="h">Plain Kubernetes objects</text>
+  <text x="874" y="378" class="s">applied by Crossplane itself,</text>
+  <text x="874" y="392" class="s">no provider needed (new in v2)</text>
+  <text x="874" y="416" class="m">Deployment</text>
+  <text x="874" y="434" class="m">Service</text>
+  <text x="874" y="452" class="m">Secret &lt;app&gt;-db-conn</text>
+  <text x="874" y="474" class="m awt">ConfigMap &lt;app&gt;-aws</text>
+  <text x="874" y="488" class="s awt">(Phase 6)</text>
+
+  <!-- status back to XR -->
+  <path d="M 640,300 L 640,262 L 440,262 L 440,206" class="st" marker-end="url(#ap)"/>
+  <text x="452" y="254" class="lbl" fill="#6D28D9">status + Ready written back to the XR</text>
+
+  <!-- MRs -> Providers -->
+  <line x1="634" y1="420" x2="564" y2="420" class="ln" marker-end="url(#a)"/>
+  <text x="572" y="412" class="lbl">watched by</text>
+
+  <!-- Providers -->
+  <rect x="320" y="330" width="240" height="184" rx="8" class="pv box"/>
+  <text x="334" y="354" class="ab">Providers</text>
+  <text x="334" y="372" class="s">package: CRDs + a controller pod</text>
+  <text x="334" y="396" class="m">provider-helm</text>
+  <text x="334" y="412" class="m">provider-kubernetes</text>
+  <text x="334" y="428" class="m awt">provider-aws-s3 / -dynamodb</text>
+  <line x1="334" y1="442" x2="546" y2="442" stroke="#93C5FD"/>
+  <text x="334" y="460" class="t"><tspan font-weight="600">ProviderConfig</tspan>: where to</text>
+  <text x="334" y="474" class="t">connect + which credentials</text>
+  <text x="334" y="494" class="t"><tspan font-weight="600">DRC</tspan> (DeploymentRuntimeConfig):</text>
+  <text x="334" y="508" class="t">how the provider pod runs</text>
+
+  <!-- Providers -> external -->
+  <line x1="320" y1="420" x2="264" y2="420" stroke="#1D4ED8" stroke-width="1.4" marker-end="url(#ab)"/>
+  <text x="268" y="412" class="lbl">reconcile</text>
+
+  <!-- External -->
+  <rect x="20" y="330" width="240" height="184" rx="8" fill="#FFFFFF" stroke="#64748B" stroke-width="1.4"/>
+  <text x="34" y="354" class="h">The real thing</text>
+  <text x="34" y="372" class="s">kept matching the MR's spec</text>
+  <rect x="34" y="386" width="212" height="52" rx="6" class="pg box"/>
+  <text x="46" y="406" class="t">Helm release → CNPG</text>
+  <text x="46" y="424" class="t">PostgreSQL cluster</text>
+  <rect x="34" y="448" width="212" height="52" rx="6" class="aw box"/>
+  <text x="46" y="468" class="t awt">S3 bucket + DynamoDB table</text>
+  <text x="46" y="486" class="s awt">in LocalStack (Phase 6)</text>
+
+  <!-- ============ legend ============ -->
+  <g transform="translate(20,548)">
+    <text x="0" y="12" class="s" font-weight="600">Legend</text>
+    <rect x="54"  y="0" width="16" height="16" rx="3" class="xp box"/><text x="76"  y="12" class="s">Crossplane API objects</text>
+    <rect x="214" y="0" width="16" height="16" rx="3" class="fn box"/><text x="236" y="12" class="s">composition function</text>
+    <rect x="364" y="0" width="16" height="16" rx="3" class="pv box"/><text x="386" y="12" class="s">MRs and providers</text>
+    <rect x="496" y="0" width="16" height="16" rx="3" class="k8 box"/><text x="518" y="12" class="s">plain Kubernetes</text>
+    <rect x="620" y="0" width="16" height="16" rx="3" class="pg box"/><text x="642" y="12" class="s">external system</text>
+    <rect x="740" y="0" width="16" height="16" rx="3" class="aw box"/><text x="762" y="12" class="s">Phase 6 (optional)</text>
+    <line x1="880" y1="8" x2="912" y2="8" class="st"/><text x="918" y="12" class="s">status flowing back</text>
+  </g>
+  <text x="20" y="600" class="s">Claims (XRC, Composite Resource Claim) existed only in Crossplane v1; v2 XRs are namespaced themselves, so this repo has none.</text>
+</svg>

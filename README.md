@@ -21,6 +21,8 @@ which used raw managed resources against real AWS (see
 
 - [What Does This Demo Implement?](#what-does-this-demo-implement)
 - [Crossplane Terms (Glossary)](#crossplane-terms-glossary)
+  - [The core objects](#the-core-objects)
+  - [Concepts you'll see in output](#concepts-youll-see-in-output)
 - [Architecture](#architecture)
 - [Repository Structure](#repository-structure)
 - [Prerequisites](#prerequisites)
@@ -39,8 +41,9 @@ which used raw managed resources against real AWS (see
 
 ## What Does This Demo Implement?
 
-A namespaced **platform API**, `App` (`platform.demo.io/v1alpha1`), that a developer
-creates directly in their own namespace:
+The demo adds a new kind of Kubernetes object called **`App`**. A developer describes
+what they want in a few lines, in the same way they would write a Deployment, and
+the platform does the rest:
 
 ```yaml
 apiVersion: platform.demo.io/v1alpha1
@@ -53,6 +56,18 @@ spec:
   database: { enabled: true, size: small }   # small|medium
   expose: true
 ```
+
+- **New kind:** `App` isn't built into Kubernetes. The platform team defines it, and
+  that is what "platform API" means. Developers get a small, safe interface (an
+  image, a replica count, "I need a database") instead of writing Deployments, Helm
+  releases and Secrets themselves.
+- **`apiVersion: platform.demo.io/v1alpha1`:** the API group and version this
+  repo gives `App`, the same way a Deployment uses `apps/v1`. `v1alpha1` means
+  the API is still early and may change.
+- **Namespaced:** an App lives in the team's own namespace (`team-a` here), like a
+  Deployment does. Teams see and manage only their own Apps, and everything an App
+  creates lands in that namespace too. Crossplane v1 needed an extra "claim" object
+  for this; v2 doesn't (see [Glossary](#crossplane-terms-glossary)).
 
 From that one object, Crossplane builds and maintains:
 
@@ -75,22 +90,7 @@ short: an **XRD** defines a new API, an **XR** is one object of that API, a
 **Composition** says what the XR turns into, and **Providers** reconcile the
 resulting **MRs** against the outside world.
 
-```text
-XRD (defines the App API) ──> XR (App/hello in team-a)
-                                │ selects
-                                ▼
-                     Composition (app-dev | app-prod)
-                     = pipeline of composition functions
-                                │ renders
-                                ▼
-                     composed resources
-                     ├── plain Kubernetes: Deployment, Service, Secret, ConfigMap
-                     └── MRs: Release, Object, Bucket, Table
-                                │ reconciled by
-                                ▼
-                     Providers (helm, kubernetes, aws-s3, …)
-                     ──> the real thing: Helm release, LocalStack bucket, …
-```
+![How the Crossplane terms fit together](docs/glossary.svg)
 
 ### The core objects
 
@@ -129,33 +129,7 @@ XRD (defines the App API) ──> XR (App/hello in team-a)
 The diagram above shows the components. This sequence shows what happens when a
 developer applies an App:
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Dev as Developer (Mac)
-    participant API as kube-apiserver
-    participant XP as Crossplane
-    participant Fn as Functions<br/>(P&T → go-templating → auto-ready)
-    participant Helm as provider-helm
-    participant CNPG as CNPG operator
-    participant K8s as provider-kubernetes
-
-    Dev->>API: kubectl apply App/hello
-    API-->>Dev: rejected if schema invalid (e.g. size: huge)
-    API->>XP: App created (watch)
-    XP->>Fn: run pipeline (observed state → desired state)
-    Fn-->>XP: Deployment, Service, Release (+ status)
-    XP->>API: apply Deployment + Service directly
-    XP->>API: apply Release (helm.m.crossplane.io)
-    Helm->>API: helm install cnpg/cluster → Cluster CR
-    CNPG->>API: Postgres pod, Services, Secret hello-db-app
-    XP->>Fn: re-run pipeline (Release now observed)
-    Fn-->>XP: + observe-only Objects for Cluster & Secret
-    K8s->>API: get Cluster status / Secret data
-    XP->>Fn: re-run (credentials observed, Cluster Ready)
-    Fn-->>XP: + Secret hello-db-conn, status.dbReady=true
-    Note over XP,Fn: function-auto-ready marks the App Ready<br/>only when every composed resource is Ready
-```
+![Sequence: what happens when a developer applies an App](docs/apply-sequence.svg)
 
 **Key points**
 
@@ -211,7 +185,10 @@ sequenceDiagram
 │   ├── validate.sh                # crossplane resource validate (+ must-fail cases)
 │   ├── check-versions.sh          # manifests must match versions.env
 │   ├── cases/  fixtures/  golden/
-└── docs/architecture.svg
+└── docs/
+    ├── architecture.svg           # components (top of this README)
+    ├── glossary.svg               # how XRD, XR, Composition, MRs, providers fit together
+    └── apply-sequence.svg         # what happens when an App is applied
 ```
 
 ## Prerequisites
