@@ -20,6 +20,7 @@ which used raw managed resources against real AWS (see
 ## Table of Contents
 
 - [What Does This Demo Implement?](#what-does-this-demo-implement)
+- [Crossplane Terms (Glossary)](#crossplane-terms-glossary)
 - [Architecture](#architecture)
 - [Repository Structure](#repository-structure)
 - [Prerequisites](#prerequisites)
@@ -66,6 +67,62 @@ From that one object, Crossplane builds and maintains:
 There are two implementations of the same API: **`app-dev`** (the default) and
 **`app-prod`** (2 Postgres instances, PodDisruptionBudgets, bigger requests). An App
 chooses one with `spec.crossplane.compositionSelector`.
+
+## Crossplane Terms (Glossary)
+
+Crossplane uses many abbreviations, and the rest of this README uses them freely. In
+short: an **XRD** defines a new API, an **XR** is one object of that API, a
+**Composition** says what the XR turns into, and **Providers** reconcile the
+resulting **MRs** against the outside world.
+
+```text
+XRD (defines the App API) ──> XR (App/hello in team-a)
+                                │ selects
+                                ▼
+                     Composition (app-dev | app-prod)
+                     = pipeline of composition functions
+                                │ renders
+                                ▼
+                     composed resources
+                     ├── plain Kubernetes: Deployment, Service, Secret, ConfigMap
+                     └── MRs: Release, Object, Bucket, Table
+                                │ reconciled by
+                                ▼
+                     Providers (helm, kubernetes, aws-s3, …)
+                     ──> the real thing: Helm release, LocalStack bucket, …
+```
+
+### The core objects
+
+| Term | Stands for | What it is | In this repo |
+|---|---|---|---|
+| **CRD** | Custom Resource Definition | Plain Kubernetes: adds a new object type to the API server. Crossplane, its providers and XRDs all work by creating CRDs. | Created for you; `kubectl get crd \| grep crossplane` |
+| **XRD** | Composite Resource Definition | Crossplane's way to define **your own API**: a name, an OpenAPI schema (fields, defaults, enums, bounds) and a scope. Crossplane creates the matching CRD from it. | [`crossplane/apis/app-xrd.yaml`](crossplane/apis/app-xrd.yaml) defines `App` (`platform.demo.io/v1alpha1`, `scope: Namespaced`) |
+| **XR** | Composite Resource | One object of an XRD's API, i.e. what a developer actually creates. Crossplane composes resources for it and writes `status` back. | `App/hello` in namespace `team-a` ([`examples/hello.yaml`](examples/hello.yaml)) |
+| **Composition** | — | The recipe that turns an XR into resources. An XRD can have several; the XR picks one (here via `spec.crossplane.compositionSelector`). | [`app-dev`](crossplane/compositions/app-dev.yaml) (default) and [`app-prod`](crossplane/compositions/app-prod.yaml) |
+| **Function** | Composition Function | A small program, shipped as a package and run as a pod, that is one step of a Composition's **pipeline**. Each step gets the XR plus the observed state and returns the desired resources. | `function-patch-and-transform`, `function-go-templating`, `function-auto-ready` ([`functions.yaml`](crossplane/functions/functions.yaml)) |
+| **Composed resource** | — | Anything a Composition creates for an XR. In v2 this can be **any** Kubernetes kind, not only MRs. Each carries the label `crossplane.io/composite=<xr-name>`. | Deployment, Service, Secret, ConfigMap, plus the MRs below |
+| **MR** | Managed Resource | A Kubernetes object that stands for **one external thing** (a Helm release, a bucket, …). A provider keeps the external thing matching the MR's `spec` and reports back in `status`. In v2, MRs are namespaced (API groups with `.m.`). | `Release` (`helm.m.crossplane.io`), `Object` (`kubernetes.m.crossplane.io`), Phase 6: `Bucket`, `BucketVersioning`, `Table` (`*.aws.m.upbound.io`) |
+| **Provider** | — | A package that installs the CRDs for a set of MRs plus the controller (a pod) that reconciles them. | `provider-helm`, `provider-kubernetes` ([`02-providers.yaml`](crossplane/providers/02-providers.yaml)); Phase 6: `provider-aws-s3`, `provider-aws-dynamodb` |
+| **Provider family** | — | A large provider split into one package per service, plus a shared "family" package that owns the common config types. You install only the services you need instead of the whole monolith. | Phase 6: `provider-family-aws` + `-s3` + `-dynamodb` ([`aws/02-providers.yaml`](crossplane/providers/aws/02-providers.yaml)) |
+| **ProviderConfig** / **ClusterProviderConfig** | — | Tells a provider **where to connect and how to authenticate**. `ProviderConfig` is namespaced, `ClusterProviderConfig` is cluster-wide. Every MR points at one with `providerConfigRef`. | `default` for helm/kubernetes ([`04-providerconfigs.yaml`](crossplane/providers/04-providerconfigs.yaml)); `localstack` for AWS ([`aws/03-providerconfig.yaml`](crossplane/providers/aws/03-providerconfig.yaml)) |
+| **DRC** | DeploymentRuntimeConfig | Tunes **how a provider or function pod runs**: args, env, resources, service account. Replaces v1's `ControllerConfig`. | Laptop-sized requests ([`01-runtime-config.yaml`](crossplane/providers/01-runtime-config.yaml)); the AWS egress guard ([`aws/01-runtime-config.yaml`](crossplane/providers/aws/01-runtime-config.yaml)) |
+| **Package** / **xpkg** | Crossplane package | The OCI image format for providers, functions and configurations. v2 has no default registry, so references are fully qualified. | `xpkg.crossplane.io/crossplane-contrib/provider-helm:v1.5.0` |
+| **ProviderRevision** / **FunctionRevision** | — | One installed version of a package. Upgrading creates a new revision; the old one is deactivated. | `kubectl get providerrevisions` |
+| **XRC** / Claim | Composite Resource Claim | **v1 only.** A namespaced proxy for a cluster-scoped XR. v2 XRs can be namespaced themselves, so this repo has no claims. | — (see [v1 → v2](#crossplane-v1--v2-what-changed)) |
+
+### Concepts you'll see in output
+
+| Term | Meaning | In this repo |
+|---|---|---|
+| **Pipeline mode** | The only Composition mode in v2: a list of function steps that run in order, each adding to the desired state. | 4 steps: `app-core`, `database`, `aws`, `ready`, see [The Compositions](#the-compositions-pipeline-mode) |
+| **Observed / desired state** | *Observed*: what exists right now (the XR and its composed resources). *Desired*: what the functions say should exist. Crossplane applies the difference. | `make render` with `tests/fixtures/observed-db-ready.yaml` simulates observed state offline |
+| **Reconcile** / **drift** | Crossplane and providers keep comparing desired and actual state and fix any difference (drift), whoever caused it. | Demo scene 3 scales and deletes the Deployment, Phase 6 scene 5 deletes the bucket; Crossplane reverts both |
+| **`Synced` / `Ready`** | The two standard conditions. `Synced`: the last reconcile succeeded. `Ready`: the resource is actually usable (for an XR: all composed resources are Ready). | `kubectl get app` columns; `function-auto-ready` sets XR readiness |
+| **`Responsive`** | v2 condition from the **watch circuit breaker**: if composed resources change too fast, Crossplane stops reacting to watch events for that XR for a while. | Demo scene 4, see [Watch circuit breaker](#watch-circuit-breaker-new-in-v2) |
+| **Management policies** | Which operations a provider may perform on an MR. `["Observe"]` = read-only: import and report, never create, change or delete. | The CNPG `Cluster` and its Secret are read through observe-only `Object`s |
+| **External name** | Annotation `crossplane.io/external-name`: the name of the external thing, if it differs from the MR's name. | Phase 6 buckets/tables are named `<namespace>-<app>` |
+| **Trace** | `crossplane resource trace` shows an XR and the tree of everything composed from it, with each node's status. | `crossplane resource trace app/hello -n team-a --context docker-desktop` |
 
 ## Architecture
 
@@ -275,7 +332,7 @@ implementation when the App doesn't choose one.
 
 ### The Compositions: Pipeline mode
 
-Both Compositions run the same three-step pipeline:
+Both Compositions run the same four-step pipeline:
 
 1. **function-patch-and-transform**: the always-present part. A Deployment and
    Service (plus a PDB in prod), patched from `spec`. `expose` maps to the Service
@@ -288,7 +345,12 @@ Both Compositions run the same three-step pipeline:
    credentials are observed, it emits the App's own `Secret <app>-db-conn` and
    writes `status`. Each step waits for the previous one to be observed, so nothing
    is applied too early.
-3. **function-auto-ready**: built-in health checks for Deployments, LoadBalancer
+3. **function-go-templating** again, for the optional Phase 6 part (step `aws`):
+   when `bucket` or `table` is true, it emits the S3 `Bucket` (plus
+   `BucketVersioning` in prod), the DynamoDB `Table` and the `<app>-aws` ConfigMap.
+   With both false (the default) it emits nothing, so Apps without them are
+   unaffected. See [Phase 6](#optional-aws-flavour-on-localstack-phase-6).
+4. **function-auto-ready**: built-in health checks for Deployments, LoadBalancer
    Services and Secrets, and the `Ready` condition for managed resources. The App
    becomes `Ready` only when every composed resource is ready.
 
