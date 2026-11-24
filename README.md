@@ -392,6 +392,98 @@ crossplane xrd convert crossplane/apis/app-xrd.yaml
 `tests/validate.sh` runs the full validation, including composed resources against the
 provider CRDs. `make test` runs it together with the golden renders.
 
+### Other `crossplane` commands
+
+These aren't used by the demo, but they're what you'd reach for next.
+
+```bash
+# Download the CRDs of the providers this repo installs (16 files: Release, Object, ProviderConfigs...)
+crossplane xpkg get-crds crossplane/providers/02-providers.yaml --output-dir /tmp/crds
+# ...or as JSON Schema, for YAML autocompletion in your editor
+crossplane xpkg get-crds crossplane/providers/02-providers.yaml --output-dir /tmp/schemas --json-schema
+```
+
+| Command | What it does |
+|---|---|
+| `crossplane xpkg install provider <ref>` / `xpkg update provider <ref>` | Install or upgrade a package in the cluster without writing YAML (the demo applies `crossplane/providers/02-providers.yaml` instead, so versions stay pinned in git). Takes `--context`. |
+| `crossplane xpkg init <name> function-template-go` | Scaffold a new function (or provider) from a template. |
+| `crossplane xpkg build` / `xpkg push <ref>` | Build a package (`.xpkg`) and push it to an OCI registry. |
+| `crossplane xpkg extract <ref>` | Fetch a package and unpack it into a local cache (e.g. to inspect its CRDs). |
+| `crossplane composition convert composition-environment` | Rewrite a pipeline Composition that uses the old built-in environment to use `function-environment-configs`. |
+| `crossplane project init` / `build` / `push` / `run` / `stop` | Beta "control plane project" workflow: one repo holding XRDs, Compositions, functions and dependencies, built into packages, with `run` starting a local dev control plane. |
+| `crossplane xrd generate <example-xr.yaml>` | Infer an XRD from an example XR (or a SimpleSchema file). Needs a `crossplane-project.yaml`. |
+| `crossplane composition generate <xrd.yaml>` | Starter Composition (a single `function-auto-ready` step) for an XRD. Needs a project. |
+| `crossplane function generate` | Scaffold an embedded function for a Composition inside a project. |
+| `crossplane dependency add <ref>` | Add a provider or function dependency to a project. |
+| `crossplane config view` / `config set` | Show or change the CLI's own settings (e.g. which beta features are on). |
+| `source <(crossplane completions)` | Shell completion for zsh, bash or fish. |
+
+This repo is plain manifests plus a Makefile, not a Crossplane project, so the
+project-based commands (`xrd generate`, `composition generate`, `function`,
+`dependency`) exit with `failed to read project file "crossplane-project.yaml"` here.
+
+### `kubectl` for Crossplane objects
+
+Crossplane's types are ordinary Kubernetes resources, so `kubectl` is often the
+quickest view. Crossplane also puts its CRDs into **categories**, which let one word
+match many kinds:
+
+```bash
+C="--context docker-desktop"
+
+# Categories: one word, many kinds
+kubectl $C get crossplane              # XRDs, Compositions, CompositionRevisions, ...
+kubectl $C get pkg                     # all providers and functions
+kubectl $C get managed -A              # every managed resource: the Helm Release, the observe-only Objects
+kubectl $C get composite -A            # every XR (here: Apps)
+kubectl $C api-resources --categories=crossplane   # which kinds are in a category
+
+# Packages
+kubectl $C get providers               # INSTALLED / HEALTHY / PACKAGE
+kubectl $C get functions
+kubectl $C get providerrevisions,functionrevisions   # the image actually running, and Active/Inactive
+kubectl $C describe providers provider-helm   # conditions + events (plural: see the note below)
+kubectl $C get deploymentruntimeconfigs
+kubectl $C get clusterproviderconfigs.kubernetes.m.crossplane.io,clusterproviderconfigs.helm.m.crossplane.io
+
+# The platform API
+kubectl $C get xrd                     # ESTABLISHED (OFFERED stays empty: v2 has no claims)
+kubectl $C get compositions
+kubectl $C get compositionrevisions    # a new revision appears each time a Composition changes
+kubectl $C explain app.spec            # the App schema, with the XRD's field descriptions
+kubectl $C explain app.spec.database
+
+# One App (apply examples/hello.yaml first)
+kubectl $C get app -A
+kubectl $C -n team-a describe app hello              # conditions + events from the composition pipeline
+kubectl $C -n team-a get app hello -o jsonpath='{.status.conditions}' | jq
+kubectl $C -n team-a wait --for=condition=Ready app/hello --timeout=3m
+kubectl $C -n team-a get all,secret -l crossplane.io/composite=hello   # everything composed for it
+kubectl $C -n team-a get releases.helm.m.crossplane.io,objects.kubernetes.m.crossplane.io
+kubectl $C -n team-a get events --field-selector involvedObject.kind=App
+
+# Crossplane itself
+kubectl $C -n crossplane-system get pods
+kubectl $C -n crossplane-system get events --sort-by=.lastTimestamp
+kubectl $C -n crossplane-system logs deploy/crossplane -c crossplane --since=10m
+```
+
+Two notes:
+- **Use the plural `providers`.** With kubectl v1.37, the singular form
+  (`kubectl describe provider provider-helm`, and the same with `get`) fails with
+  `you must specify only one resource`. `providers provider-helm`,
+  `provider/provider-helm` and `providers.pkg.crossplane.io provider-helm` all work.
+- **`get crossplane` prints** `Warning: apiextensions.crossplane.io Usage is deprecated`.
+  The category includes the legacy `Usage` type, which Crossplane still ships. It's harmless.
+
+To stop Crossplane from reconciling an App for a while (for example, to debug by
+hand without it reverting your changes), pause it, then remove the annotation to resume:
+
+```bash
+kubectl $C -n team-a annotate app hello crossplane.io/paused=true
+kubectl $C -n team-a annotate app hello crossplane.io/paused-
+```
+
 ## The Demo, Scene by Scene
 
 `make demo` (pauses for Enter) or `make demo-auto`. Times were measured on the
